@@ -1,0 +1,12 @@
+file_identifier "LMSG";
+
+table LocalizedMessage {
+  message_id: uint32;
+  korean: string;
+  japanese: string;
+  thai: string;
+  chinese: string;
+  english: string;
+}
+
+root_type LocalizedMessage;
