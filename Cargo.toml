@@ -4,6 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clap = { version = "4.5.48", features = ["derive"] }
-flatbuffers = "25.9.23"
-rusqlite = "0.37.0"
+flatbuffers = { version = "25.9.23", features = ["serde"] }
+serde = { version = "1.0.228", features = ["derive"] }
