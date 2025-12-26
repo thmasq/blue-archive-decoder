@@ -3,6 +3,11 @@ name = "blue-archive-decoder"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["cdylib"]
+
 [dependencies]
+absurder-sql = "0.1.23"
 flatbuffers = { version = "25.9.23", features = ["serde"] }
 serde = { version = "1.0.228", features = ["derive"] }
+wasm-bindgen = "0.2.106"
