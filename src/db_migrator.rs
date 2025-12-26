@@ -1,7 +1,8 @@
 use crate::blue_archive_generated::global::*;
-use flatbuffers::{ForwardsUOffset, Vector};
 use regex::Regex;
+use sqlite_wasm_reader::{Database, SelectQuery, Value};
 use std::collections::BTreeMap;
+use std::io::{Read, Seek};
 
 /// Helper function to parse the Debug string of a struct and extract fields.
 /// Returns a map of "field_name" -> "SQL_value_string" and a list of column definitions.
@@ -51,42 +52,58 @@ fn parse_debug_struct(debug_str: &str) -> (BTreeMap<String, String>, Vec<(String
     (values, columns)
 }
 
-/// Generic migration function called by the macro
-fn migrate_table_generic<T>(
-    tx: &Transaction,
-    source_table_name: &str,
-    target_table_name: &str,
-    parse_root_fn: fn(&[u8]) -> Result<T, flatbuffers::InvalidFlatbuffer>,
-    get_data_list_fn: fn(
-        T,
-    ) -> Option<
-        Vector<'static, ForwardsUOffset<impl flatbuffers::Follow<'static>>>,
-    >,
-    // Note: The above signature is pseudo-code for the closure logic used below in the macro
-) -> Result<(), Box<dyn std::error::Error>> {
-    // This function is implemented effectively inside the macro to handle the specific types
-    Ok(())
-}
-
 macro_rules! migrate_table {
-    ($tx:expr, $base_name:ident) => {
+    // Pattern 1: Standard naming
+    // Recursively calls Pattern 2 with the default generated names
+    ($db:expr, $base_name:ident) => {
+        paste::paste! {
+            migrate_table!($db, $base_name, [< $base_name ExcelTable >], [< $base_name ExcelT >])
+        }
+    };
+
+    // Pattern 2: Explicit naming
+    // Used when the Rust struct names don't strictly match the base name (e.g. BGM_Global -> BgmGlobal)
+    ($db:expr, $base_name:ident, $root_type:ident, $native_type:ident) => {
         paste::paste! {
             {
+                // The SQL table names usually strictly follow the base name string
                 let source_table = stringify!([< $base_name DBSchema >]);
                 let target_table = stringify!([< $base_name Excel >]);
 
-                println!("Migrating {} -> {}...", source_table, target_table);
+                println!("-- Migrating {} -> {}...", source_table, target_table);
 
-                // 1. Get the bytes from the source database
-                // Assuming the source table has a single row with the blob, or we aggregate them.
-                // Usually in BA DBs, the table has columns, but the 'bytes' column in one of the rows (or the only row) contains the full flatbuffer list.
-                let mut stmt = $tx.prepare(&format!("SELECT bytes FROM {} LIMIT 1", source_table))?;
-                let bytes: Vec<u8> = stmt.query_row([], |row| row.get(0)).unwrap_or_default();
+                // 1. Get the bytes from the source database using sqlite-wasm-reader
+                let query_str = format!("SELECT bytes FROM {} LIMIT 1", source_table);
+                let bytes: Vec<u8> = match SelectQuery::parse(&query_str) {
+                    Ok(query) => {
+                        match $db.execute_query(&query) {
+                            Ok(rows) => {
+                                if let Some(row) = rows.first() {
+                                    // Try to get the blob from the first available value
+                                    match row.values().next() {
+                                        Some(Value::Blob(b)) => b.clone(),
+                                        Some(Value::Text(s)) => s.as_bytes().to_vec(),
+                                        _ => Vec::new(),
+                                    }
+                                } else {
+                                    Vec::new()
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("-- Error executing query for {}: {:?}", source_table, e);
+                                Vec::new()
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("-- Error parsing query for {}: {:?}", source_table, e);
+                        Vec::new()
+                    }
+                };
 
                 if !bytes.is_empty() {
-                    // 2. Decode the Flatbuffer
-                    // root type is usually NameExcelTable
-                    type RootTable<'a> = [< $base_name Excel >]<'a>;
+                    // 2. Decode the Flatbuffer using the explicit Root Type
+                    type RootTable<'a> = $root_type<'a>;
 
                     match flatbuffers::root::<RootTable>(&bytes) {
                         Ok(root) => {
@@ -94,184 +111,199 @@ macro_rules! migrate_table {
                                 let mut first_row = true;
 
                                 for item in list {
-                                    // 3. Unpack to Native Struct (T) to get readable fields
-                                    let native = item.unpack();
+                                    // 3. Unpack to Native Struct (T)
+                                    // Use the explicit Native Type
+                                    let native: $native_type = item.unpack();
 
                                     // 4. Use Debug trait to inspect fields
                                     let debug_str = format!("{:?}", native);
                                     let (values_map, columns) = parse_debug_struct(&debug_str);
 
-                                    // 5. Create Table (only once)
+                                    // 5. Create Table SQL (only once)
                                     if first_row {
                                         let col_defs: Vec<String> = columns.iter()
                                             .map(|(k, t)| format!("{} {}", k, t))
                                             .collect();
-                                        let create_sql = format!("CREATE TABLE IF NOT EXISTS {} ({})", target_table, col_defs.join(", "));
-                                        $tx.execute(&create_sql, [])?;
+
+                                        println!("CREATE TABLE IF NOT EXISTS {} ({});", target_table, col_defs.join(", "));
                                         first_row = false;
                                     }
 
-                                    // 6. Insert Row
-                                    // We need to match the columns order defined in `columns`
+                                    // 6. Insert Row SQL
                                     let col_names: Vec<&str> = columns.iter().map(|(k, _)| k.as_str()).collect();
                                     let vals: Vec<String> = columns.iter()
                                         .map(|(k, _)| values_map.get(k).cloned().unwrap_or("NULL".to_string()))
                                         .collect();
 
-                                    let insert_sql = format!(
-                                        "INSERT INTO {} ({}) VALUES ({})",
+                                    println!(
+                                        "INSERT INTO {} ({}) VALUES ({});",
                                         target_table,
                                         col_names.join(", "),
                                         vals.join(", ")
                                     );
-
-                                    $tx.execute(&insert_sql, [])?;
                                 }
                             }
                         },
-                        Err(e) => println!("  Error decoding Flatbuffer for {}: {:?}", source_table, e),
+                        Err(e) => eprintln!("-- Error decoding Flatbuffer for {}: {:?}", source_table, e),
                     }
                 } else {
-                    println!("  No data found in {}", source_table);
+                    println!("-- No data found in {}", source_table);
                 }
             }
         }
     };
 }
 
-pub fn migrate_all(conn: &mut Connection) -> Result<(), Box<dyn std::error::Error>> {
-    let tx = conn.transaction()?;
+pub fn migrate_all<IO: Read + Seek>(
+    db: &mut Database<IO>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    migrate_table!(db, AccountLevel);
+    migrate_table!(db, AssistEchelonTypeConvert);
+    migrate_table!(db, Attendance);
+    migrate_table!(db, AttendanceReward);
+    migrate_table!(db, AudioAnimator);
+    migrate_table!(db, BGM);
+    migrate_table!(db, BGMRaid);
+    migrate_table!(db, BGMUI);
+    migrate_table!(db, BGM_Global, BgmGlobalExcelTable, BgmGlobalExcelT);
+    migrate_table!(db, Camera);
+    migrate_table!(db, CharacterDialog);
+    migrate_table!(db, CharacterDialogEmoji);
+    migrate_table!(db, CharacterDialogEvent);
+    migrate_table!(db, CharacterDialogSubtitle);
+    migrate_table!(db, CharacterGear);
+    migrate_table!(db, CharacterGearLevel);
+    migrate_table!(db, CharacterPotential);
+    migrate_table!(db, CharacterPotentialReward);
+    migrate_table!(db, CharacterPotentialStat);
+    migrate_table!(db, CharacterVoice);
+    migrate_table!(db, CharacterVoiceSubtitle);
+    migrate_table!(db, ClanAssistSlot);
+    migrate_table!(db, ClanChattingEmoji);
+    migrate_table!(db, ClanReward);
+    migrate_table!(db, CombatEmoji);
+    migrate_table!(db, ContentEnterCostReduce);
+    migrate_table!(db, ContentSpoilerPopup);
+    migrate_table!(db, ContentsScenario);
+    migrate_table!(db, ContentsShortcut);
+    migrate_table!(db, Currency);
+    migrate_table!(db, Emblem);
+    migrate_table!(db, EventContentNotify);
+    migrate_table!(db, EventContentSpoilerPopup);
+    migrate_table!(db, EventContentTreasureCellReward);
+    migrate_table!(db, EventContentTreasure);
+    migrate_table!(db, EventContentTreasureReward);
+    migrate_table!(db, EventContentTreasureRound);
+    migrate_table!(db, FarmingDungeonLocationManage);
+    migrate_table!(db, FavorLevel);
+    migrate_table!(db, FavorLevelReward);
+    migrate_table!(db, FixedEchelonSetting);
+    migrate_table!(db, FormationLocation);
+    migrate_table!(db, Ground);
+    migrate_table!(db, GroundModuleReward);
+    migrate_table!(db, IdCardBackground);
+    migrate_table!(db, Information);
+    migrate_table!(db, LoadingImage);
+    migrate_table!(db, LocalizeCharProfileChange);
+    migrate_table!(db, Localize);
+    migrate_table!(db, LocalizeError);
+    migrate_table!(db, LocalizeEtc);
+    migrate_table!(db, LocalizeSkill);
+    migrate_table!(db, MemoryLobby);
+    migrate_table!(
+        db,
+        MemoryLobby_Global,
+        MemoryLobbyGlobalExcelTable,
+        MemoryLobbyGlobalExcelT
+    );
+    migrate_table!(db, MessagePopup);
+    migrate_table!(db, MiniGameDefenseCharacterBan);
+    migrate_table!(db, MiniGameDefenseFixedStat);
+    migrate_table!(db, MiniGameDefenseInfo);
+    migrate_table!(db, MiniGameDefenseStage);
+    migrate_table!(db, MiniGameDreamCollectionScenario);
+    migrate_table!(db, MiniGameDreamDailyPoint);
+    migrate_table!(db, MiniGameDreamEnding);
+    migrate_table!(db, MiniGameDreamEndingReward);
+    migrate_table!(db, MiniGameDreamInfo);
+    migrate_table!(db, MiniGameDreamParameter);
+    migrate_table!(db, MiniGameDreamReplayScenario);
+    migrate_table!(db, MiniGameDreamSchedule);
+    migrate_table!(db, MiniGameDreamScheduleResult);
+    migrate_table!(db, MiniGameDreamTimeline);
+    migrate_table!(db, MiniGameRoadPuzzleInfo);
+    migrate_table!(db, MiniGameRoadPuzzleRailSetReward);
+    migrate_table!(db, MiniGameRoadPuzzleReward);
+    migrate_table!(db, MiniGameRoadPuzzleVoice);
+    migrate_table!(db, MinigameDreamVoice);
+    migrate_table!(
+        db,
+        MinigameRoadPuzzleAdditionalReward,
+        MiniGameRoadPuzzleAdditionalRewardExcelTable,
+        MiniGameRoadPuzzleAdditionalRewardExcelT
+    );
+    migrate_table!(db, MinigameRoadPuzzleMap);
+    migrate_table!(db, MinigameRoadPuzzleMapTile);
+    migrate_table!(db, MinigameRoadPuzzleRailTile);
+    migrate_table!(db, MinigameRoadPuzzleRoadRound);
+    migrate_table!(
+        db,
+        MinigameRoadPuzzleAdditionalReward,
+        MiniGameRoadPuzzleAdditionalRewardExcelTable,
+        MiniGameRoadPuzzleAdditionalRewardExcelT
+    );
+    migrate_table!(db, MissionEmergencyComplete);
+    migrate_table!(db, MultiFloorRaidReward);
+    migrate_table!(db, MultiFloorRaidSeasonManage);
+    migrate_table!(db, MultiFloorRaidStage);
+    migrate_table!(db, MultiFloorRaidStatChange);
+    migrate_table!(db, ObstacleStat);
+    migrate_table!(db, OpenCondition);
+    migrate_table!(db, Operator);
+    migrate_table!(db, ScenarioBGEffect);
+    migrate_table!(db, ScenarioBGName);
+    migrate_table!(
+        db,
+        ScenarioBGName_Global,
+        ScenarioBgnameGlobalExcelTable,
+        ScenarioBgnameGlobalExcelT
+    );
+    migrate_table!(db, ScenarioCharacterEmotion);
+    migrate_table!(db, ScenarioCharacterName);
+    migrate_table!(db, ScenarioCharacterSituationSet);
+    migrate_table!(db, ScenarioContentCollection);
+    migrate_table!(db, ScenarioEffect);
+    migrate_table!(db, ScenarioMode);
+    migrate_table!(db, ScenarioModeReward);
+    migrate_table!(db, ScenarioResourceInfo);
+    migrate_table!(db, ScenarioScript);
+    migrate_table!(db, ScenarioTransition);
+    migrate_table!(db, SchoolDungeonReward);
+    migrate_table!(db, SchoolDungeonStage);
+    migrate_table!(db, ServiceAction);
+    migrate_table!(db, ShortcutType);
+    migrate_table!(db, SkillAdditionalTooltip);
+    migrate_table!(db, SoundUI);
+    migrate_table!(db, SpineLipsync);
+    migrate_table!(db, StageFileRefreshSetting);
+    migrate_table!(db, StatLevelInterpolation);
+    migrate_table!(db, StickerGroup);
+    migrate_table!(db, StickerPageContent);
+    migrate_table!(db, StoryStrategy);
+    migrate_table!(db, Toast);
+    migrate_table!(db, TutorialCharacterDialog);
+    migrate_table!(db, Tutorial);
+    migrate_table!(db, TutorialFailureImage);
+    migrate_table!(db, UnderCoverStage);
+    migrate_table!(db, Video);
+    migrate_table!(db, Video_Global, VideoGlobalExcelTable, VideoGlobalExcelT);
+    migrate_table!(db, VoiceCommon);
+    migrate_table!(db, Voice);
+    migrate_table!(db, VoiceLogicEffect);
+    migrate_table!(db, VoiceRoomException);
+    migrate_table!(db, VoiceSpine);
+    migrate_table!(db, VoiceTimeline);
+    migrate_table!(db, WorldRaidCondition);
 
-    // List all tables here. The macro handles the naming convention:
-    // Input: AccountLevel -> Reads AccountLevelDBSchema, Writes AccountLevelExcel
-
-    migrate_table!(tx, AccountLevel);
-    migrate_table!(tx, AssistEchelonTypeConvert);
-    migrate_table!(tx, Attendance);
-    migrate_table!(tx, AttendanceReward);
-    migrate_table!(tx, AudioAnimator);
-    migrate_table!(tx, BGM);
-    migrate_table!(tx, BGMRaid);
-    migrate_table!(tx, BGMUI);
-    migrate_table!(tx, BGM_Global);
-    migrate_table!(tx, Camera);
-    migrate_table!(tx, CharacterDialog);
-    migrate_table!(tx, CharacterDialogEmoji);
-    migrate_table!(tx, CharacterDialogEvent);
-    migrate_table!(tx, CharacterDialogSubtitle);
-    migrate_table!(tx, CharacterGear);
-    migrate_table!(tx, CharacterGearLevel);
-    migrate_table!(tx, CharacterPotential);
-    migrate_table!(tx, CharacterPotentialReward);
-    migrate_table!(tx, CharacterPotentialStat);
-    migrate_table!(tx, CharacterVoice);
-    migrate_table!(tx, CharacterVoiceSubtitle);
-    migrate_table!(tx, ClanAssistSlot);
-    migrate_table!(tx, ClanChattingEmoji);
-    migrate_table!(tx, ClanReward);
-    migrate_table!(tx, CombatEmoji);
-    migrate_table!(tx, ContentEnterCostReduce);
-    migrate_table!(tx, ContentSpoilerPopup);
-    migrate_table!(tx, ContentsScenario);
-    migrate_table!(tx, ContentsShortcut);
-    migrate_table!(tx, Currency);
-    migrate_table!(tx, Emblem);
-    migrate_table!(tx, EventContentNotify);
-    migrate_table!(tx, EventContentSpoilerPopup);
-    migrate_table!(tx, EventContentTreasureCellReward);
-    migrate_table!(tx, EventContentTreasure);
-    migrate_table!(tx, EventContentTreasureReward);
-    migrate_table!(tx, EventContentTreasureRound);
-    migrate_table!(tx, FarmingDungeonLocationManage);
-    migrate_table!(tx, FavorLevel);
-    migrate_table!(tx, FavorLevelReward);
-    migrate_table!(tx, FixedEchelonSetting);
-    migrate_table!(tx, FormationLocation);
-    migrate_table!(tx, Ground);
-    migrate_table!(tx, GroundModuleReward);
-    migrate_table!(tx, IdCardBackground);
-    migrate_table!(tx, Information);
-    migrate_table!(tx, LoadingImage);
-    migrate_table!(tx, LocalizeCharProfileChange);
-    migrate_table!(tx, Localize);
-    migrate_table!(tx, LocalizeError);
-    migrate_table!(tx, LocalizeEtc);
-    migrate_table!(tx, LocalizeSkill);
-    migrate_table!(tx, MemoryLobby);
-    migrate_table!(tx, MemoryLobby_Global);
-    migrate_table!(tx, MessagePopup);
-    migrate_table!(tx, MiniGameDefenseCharacterBan);
-    migrate_table!(tx, MiniGameDefenseFixedStat);
-    migrate_table!(tx, MiniGameDefenseInfo);
-    migrate_table!(tx, MiniGameDefenseStage);
-    migrate_table!(tx, MiniGameDreamCollectionScenario);
-    migrate_table!(tx, MiniGameDreamDailyPoint);
-    migrate_table!(tx, MiniGameDreamEnding);
-    migrate_table!(tx, MiniGameDreamEndingReward);
-    migrate_table!(tx, MiniGameDreamInfo);
-    migrate_table!(tx, MiniGameDreamParameter);
-    migrate_table!(tx, MiniGameDreamReplayScenario);
-    migrate_table!(tx, MiniGameDreamSchedule);
-    migrate_table!(tx, MiniGameDreamScheduleResult);
-    migrate_table!(tx, MiniGameDreamTimeline);
-    migrate_table!(tx, MiniGameRoadPuzzleInfo);
-    migrate_table!(tx, MiniGameRoadPuzzleRailSetReward);
-    migrate_table!(tx, MiniGameRoadPuzzleReward);
-    migrate_table!(tx, MiniGameRoadPuzzleVoice);
-    migrate_table!(tx, MinigameDreamVoice);
-    migrate_table!(tx, MinigameRoadPuzzleAdditionalReward);
-    migrate_table!(tx, MinigameRoadPuzzleMap);
-    migrate_table!(tx, MinigameRoadPuzzleMapTile);
-    migrate_table!(tx, MinigameRoadPuzzleRailTile);
-    migrate_table!(tx, MinigameRoadPuzzleRoadRound);
-    migrate_table!(tx, MissionEmergencyComplete);
-    migrate_table!(tx, MultiFloorRaidReward);
-    migrate_table!(tx, MultiFloorRaidSeasonManage);
-    migrate_table!(tx, MultiFloorRaidStage);
-    migrate_table!(tx, MultiFloorRaidStatChange);
-    migrate_table!(tx, ObstacleStat);
-    migrate_table!(tx, OpenCondition);
-    migrate_table!(tx, Operator);
-    migrate_table!(tx, ScenarioBGEffect);
-    migrate_table!(tx, ScenarioBGName);
-    migrate_table!(tx, ScenarioBGName_Global);
-    migrate_table!(tx, ScenarioCharacterEmotion);
-    migrate_table!(tx, ScenarioCharacterName);
-    migrate_table!(tx, ScenarioCharacterSituationSet);
-    migrate_table!(tx, ScenarioContentCollection);
-    migrate_table!(tx, ScenarioEffect);
-    migrate_table!(tx, ScenarioMode);
-    migrate_table!(tx, ScenarioModeReward);
-    migrate_table!(tx, ScenarioResourceInfo);
-    migrate_table!(tx, ScenarioScript);
-    migrate_table!(tx, ScenarioTransition);
-    migrate_table!(tx, SchoolDungeonReward);
-    migrate_table!(tx, SchoolDungeonStage);
-    migrate_table!(tx, ServiceAction);
-    migrate_table!(tx, ShortcutType);
-    migrate_table!(tx, SkillAdditionalTooltip);
-    migrate_table!(tx, SoundUI);
-    migrate_table!(tx, SpineLipsync);
-    migrate_table!(tx, StageFileRefreshSetting);
-    migrate_table!(tx, StatLevelInterpolation);
-    migrate_table!(tx, StickerGroup);
-    migrate_table!(tx, StickerPageContent);
-    migrate_table!(tx, StoryStrategy);
-    migrate_table!(tx, Toast);
-    migrate_table!(tx, TutorialCharacterDialog);
-    migrate_table!(tx, Tutorial);
-    migrate_table!(tx, TutorialFailureImage);
-    migrate_table!(tx, UnderCoverStage);
-    migrate_table!(tx, Video);
-    migrate_table!(tx, Video_Global);
-    migrate_table!(tx, VoiceCommon);
-    migrate_table!(tx, Voice);
-    migrate_table!(tx, VoiceLogicEffect);
-    migrate_table!(tx, VoiceRoomException);
-    migrate_table!(tx, VoiceSpine);
-    migrate_table!(tx, VoiceTimeline);
-    migrate_table!(tx, WorldRaidCondition);
-
-    tx.commit()?;
     Ok(())
 }

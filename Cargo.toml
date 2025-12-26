@@ -11,4 +11,5 @@ flatbuffers = { version = "25.9.23", features = ["serde"] }
 paste = "1.0.15"
 regex = "1.12.2"
 serde = { version = "1.0.228", features = ["derive"] }
+sqlite_wasm_reader = { git = "https://github.com/thmasq/sqlite-wasm-reader", tag = "v0.4.0" }
 wasm-bindgen = "0.2.106"
