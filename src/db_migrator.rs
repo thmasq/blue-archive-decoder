@@ -48,7 +48,7 @@ macro_rules! register_table {
     // Pattern 1: Standard naming (recurses to Pattern 2)
     ($registry:expr, $base_name:ident) => {
         paste::paste! {
-            register_table!($registry, $base_name, [< $base_name ExcelTable >], [< $base_name ExcelT >])
+            register_table!($registry, $base_name, [< $base_name Excel >], [< $base_name ExcelT >])
         }
     };
 
@@ -127,7 +127,7 @@ pub fn register_loaders(registry: &mut HashMap<String, TableLoader>) {
     register_table!(registry, BGM);
     register_table!(registry, BGMRaid);
     register_table!(registry, BGMUI);
-    register_table!(registry, BGM_Global, BgmGlobalExcelTable, BgmGlobalExcelT);
+    register_table!(registry, BGM_Global);
     register_table!(registry, Camera);
     register_table!(registry, CharacterDialog);
     register_table!(registry, CharacterDialogEmoji);
@@ -172,12 +172,7 @@ pub fn register_loaders(registry: &mut HashMap<String, TableLoader>) {
     register_table!(registry, LocalizeEtc);
     register_table!(registry, LocalizeSkill);
     register_table!(registry, MemoryLobby);
-    register_table!(
-        registry,
-        MemoryLobby_Global,
-        MemoryLobbyGlobalExcelTable,
-        MemoryLobbyGlobalExcelT
-    );
+    register_table!(registry, MemoryLobby_Global);
     register_table!(registry, MessagePopup);
     register_table!(registry, MiniGameDefenseCharacterBan);
     register_table!(registry, MiniGameDefenseFixedStat);
@@ -198,12 +193,7 @@ pub fn register_loaders(registry: &mut HashMap<String, TableLoader>) {
     register_table!(registry, MiniGameRoadPuzzleReward);
     register_table!(registry, MiniGameRoadPuzzleVoice);
     register_table!(registry, MinigameDreamVoice);
-    register_table!(
-        registry,
-        MinigameRoadPuzzleAdditionalReward,
-        MiniGameRoadPuzzleAdditionalRewardExcelTable,
-        MiniGameRoadPuzzleAdditionalRewardExcelT
-    );
+    register_table!(registry, MinigameRoadPuzzleAdditionalReward);
     register_table!(registry, MinigameRoadPuzzleMap);
     register_table!(registry, MinigameRoadPuzzleMapTile);
     register_table!(registry, MinigameRoadPuzzleRailTile);
@@ -218,12 +208,7 @@ pub fn register_loaders(registry: &mut HashMap<String, TableLoader>) {
     register_table!(registry, Operator);
     register_table!(registry, ScenarioBGEffect);
     register_table!(registry, ScenarioBGName);
-    register_table!(
-        registry,
-        ScenarioBGName_Global,
-        ScenarioBgnameGlobalExcelTable,
-        ScenarioBgnameGlobalExcelT
-    );
+    register_table!(registry, ScenarioBGName_Global);
     register_table!(registry, ScenarioCharacterEmotion);
     register_table!(registry, ScenarioCharacterName);
     register_table!(registry, ScenarioCharacterSituationSet);
@@ -252,12 +237,7 @@ pub fn register_loaders(registry: &mut HashMap<String, TableLoader>) {
     register_table!(registry, TutorialFailureImage);
     register_table!(registry, UnderCoverStage);
     register_table!(registry, Video);
-    register_table!(
-        registry,
-        Video_Global,
-        VideoGlobalExcelTable,
-        VideoGlobalExcelT
-    );
+    register_table!(registry, Video_Global);
     register_table!(registry, VoiceCommon);
     register_table!(registry, Voice);
     register_table!(registry, VoiceLogicEffect);
