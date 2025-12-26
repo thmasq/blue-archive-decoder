@@ -62,7 +62,7 @@ macro_rules! register_table {
                 // Create the loader closure
                 let loader = Box::new(move |db: &mut Database<Cursor<Vec<u8>>>| {
                     // 1. Get the bytes
-                    let query_str = format!("SELECT bytes FROM {} LIMIT 1", source_table);
+                    let query_str = format!("SELECT Bytes FROM {}", source_table);
                     let query = SelectQuery::parse(&query_str).map_err(|e| format!("Query parse error: {:?}", e))?;
 
                     let rows = db.execute_query(&query).map_err(|e| format!("DB exec error: {:?}", e))?;
