@@ -61,52 +61,53 @@ macro_rules! register_table {
 
                 // Create the loader closure
                 let loader = Box::new(move |db: &mut Database<Cursor<Vec<u8>>>| {
-                    // 1. Get the bytes
+                    // 1. Get the bytes from ALL rows
                     let query_str = format!("SELECT Bytes FROM {}", source_table);
                     let query = SelectQuery::parse(&query_str).map_err(|e| format!("Query parse error: {:?}", e))?;
 
                     let rows = db.execute_query(&query).map_err(|e| format!("DB exec error: {:?}", e))?;
 
-                    let first_row = rows.first().ok_or("No data row found")?;
-                    let bytes = match first_row.values().next() {
-                        Some(Value::Blob(b)) => b.clone(),
-                        Some(Value::Text(s)) => s.as_bytes().to_vec(),
-                        _ => return Err("Invalid blob data".into()),
-                    };
-
-                    if bytes.is_empty() {
-                        return Err("Empty blob".into());
-                    }
-
-                    // 2. Decode Flatbuffer
-                    type RootTable<'a> = $root_type<'a>;
-                    let root = flatbuffers::root::<RootTable>(&bytes)?;
-
                     let mut result_rows = Vec::new();
                     let mut headers = Vec::new();
                     let mut first = true;
 
-                    if let Some(list) = root.data_list() {
-                        for item in list {
-                            // 3. Unpack to Native
-                            let native: $native_type = item.unpack();
+                    // 2. Iterate over every row in the DB table
+                    for row in rows {
+                         let bytes = match row.values().next() {
+                            Some(Value::Blob(b)) => b.clone(),
+                            Some(Value::Text(s)) => s.as_bytes().to_vec(),
+                            _ => continue, // Skip rows with no valid blob
+                        };
 
-                            // 4. Parse fields
-                            let debug_str = format!("{:?}", native);
-                            let values_map = parse_debug_struct(&debug_str);
-
-                            if first {
-                                headers = values_map.keys().cloned().collect();
-                                first = false;
-                            }
-
-                            // Ensure values follow header order
-                            let row_vec: Vec<Value> = headers.iter()
-                                .map(|k| values_map.get(k).cloned().unwrap_or(Value::Null))
-                                .collect();
-
-                            result_rows.push(row_vec);
+                        if bytes.is_empty() {
+                            continue;
                         }
+
+                        // 3. Decode Flatbuffer Item directly (No wrapper table)
+                        // We treat the blob as the Item itself ($root_type)
+                        type RootItem<'a> = $root_type<'a>;
+                        // Note: flatbuffers::root verifies the buffer. If specific alignment or verification fails,
+                        // this might return an error.
+                        let root = flatbuffers::root::<RootItem>(&bytes)?;
+
+                        // 4. Unpack to Native
+                        let native: $native_type = root.unpack();
+
+                        // 5. Parse fields
+                        let debug_str = format!("{:?}", native);
+                        let values_map = parse_debug_struct(&debug_str);
+
+                        if first {
+                            headers = values_map.keys().cloned().collect();
+                            first = false;
+                        }
+
+                        // Ensure values follow header order
+                        let row_vec: Vec<Value> = headers.iter()
+                            .map(|k| values_map.get(k).cloned().unwrap_or(Value::Null))
+                            .collect();
+
+                        result_rows.push(row_vec);
                     }
 
                     Ok((headers, result_rows))
@@ -192,12 +193,12 @@ pub fn register_loaders(registry: &mut HashMap<String, TableLoader>) {
     register_table!(registry, MiniGameRoadPuzzleRailSetReward);
     register_table!(registry, MiniGameRoadPuzzleReward);
     register_table!(registry, MiniGameRoadPuzzleVoice);
-    register_table!(registry, MinigameDreamVoice);
-    register_table!(registry, MinigameRoadPuzzleAdditionalReward);
-    register_table!(registry, MinigameRoadPuzzleMap);
-    register_table!(registry, MinigameRoadPuzzleMapTile);
-    register_table!(registry, MinigameRoadPuzzleRailTile);
-    register_table!(registry, MinigameRoadPuzzleRoadRound);
+    register_table!(registry, MiniGameDreamVoice);
+    register_table!(registry, MiniGameRoadPuzzleAdditionalReward);
+    register_table!(registry, MiniGameRoadPuzzleMap);
+    register_table!(registry, MiniGameRoadPuzzleMapTile);
+    register_table!(registry, MiniGameRoadPuzzleRailTile);
+    register_table!(registry, MiniGameRoadPuzzleRoadRound);
     register_table!(registry, MissionEmergencyComplete);
     register_table!(registry, MultiFloorRaidReward);
     register_table!(registry, MultiFloorRaidSeasonManage);

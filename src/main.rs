@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 5. Target specific table
-    let target_table = "CharacterDialogEventExcel"; // Corresponds to CharacterDialogEventDBSchema
+    let target_table = "LocalizeExcel";
     println!("\n--- Querying Virtual Table: {} ---", target_table);
 
     if let Some(loader) = loaders.get(target_table) {
