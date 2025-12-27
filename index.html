@@ -280,7 +280,14 @@
                 const total = data.totalRows;
                 const rowHeight = data.rowHeight;
 
-                if (total === 0) return;
+                if (total === 0) {
+                    if (lastStart !== -1 || data._forceUpdate) {
+                        lastStart = -1;
+                        data._forceUpdate = false;
+                        data[handlerName](0, 0);
+                    }
+                    return;
+                }
 
                 const scrollTop = el.scrollTop;
                 const clientHeight = el.clientHeight;
