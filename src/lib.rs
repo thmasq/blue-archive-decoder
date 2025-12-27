@@ -22,6 +22,8 @@ pub struct Inspector {
     // View state for the currently selected table
     current_table_name: String,
     filtered_indices: Vec<usize>,
+
+    last_query: String,
 }
 
 #[wasm_bindgen]
@@ -94,6 +96,7 @@ impl Inspector {
             tables,
             current_table_name: String::new(),
             filtered_indices: Vec::new(),
+            last_query: String::new(),
         })
     }
 
@@ -119,45 +122,71 @@ impl Inspector {
         let row_count = self.tables.get(table_name).unwrap().rows.len();
         self.filtered_indices = (0..row_count).collect();
 
+        self.last_query.clear();
+
         Ok(row_count)
     }
 
-    /// Simple string search filter on the currently selected table
+    /// String search filter with Iterative Filtering
     pub fn apply_filter(&mut self, query: &str) -> usize {
         let table_data = match self.tables.get(&self.current_table_name) {
             Some(t) => t,
             None => return 0,
         };
 
+        let q_lower = query.to_lowercase();
+
         if query.is_empty() {
+            // Reset to full set if we aren't already there
             if self.filtered_indices.len() != table_data.rows.len() {
                 self.filtered_indices = (0..table_data.rows.len()).collect();
             }
+            self.last_query.clear();
         } else {
-            let q_lower = query.to_lowercase();
-            self.filtered_indices = table_data
-                .rows
-                .iter()
-                .enumerate()
-                .filter(|(_, row)| {
-                    for val in row.iter() {
-                        let text = match val {
-                            Value::Text(s) => s.to_lowercase(),
-                            Value::Integer(i) => i.to_string(),
-                            Value::Real(f) => f.to_string(),
-                            _ => String::new(),
-                        };
-                        if text.contains(&q_lower) {
-                            return true;
-                        }
-                    }
-                    false
-                })
-                .map(|(index, _)| index)
-                .collect();
+            // Check optimization: Is the new query a refinement of the old one?
+            // If yes, we can scan ONLY the currently filtered indices.
+            let is_refinement =
+                !self.last_query.is_empty() && q_lower.starts_with(&self.last_query);
+
+            if is_refinement {
+                // O(Filtered_Rows * Cols) - Iterative
+                self.filtered_indices.retain(|&index| {
+                    let row = &table_data.rows[index];
+                    Inspector::row_matches(row, &q_lower)
+                });
+            } else {
+                // O(Total_Rows * Cols) - Full Scan
+                // Occurs on first search, backspace, or paste
+                self.filtered_indices = table_data
+                    .rows
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, row)| Inspector::row_matches(row, &q_lower))
+                    .map(|(index, _)| index)
+                    .collect();
+            }
+
+            // Update history
+            self.last_query = q_lower;
         }
 
         self.filtered_indices.len()
+    }
+
+    // Helper to check if a row matches the query string
+    fn row_matches(row: &[Value], q_lower: &str) -> bool {
+        for val in row.iter() {
+            let text = match val {
+                Value::Text(s) => s.to_lowercase(),
+                Value::Integer(i) => i.to_string(),
+                Value::Real(f) => f.to_string(),
+                _ => String::new(),
+            };
+            if text.contains(q_lower) {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn get_columns(&self) -> Result<String, String> {
