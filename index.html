@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Blue Archive Database Viewer (Alpine.js)</title>
+    <title>Blue Archive Database Viewer (Fixed)</title>
     <style>
         html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
         body { 
@@ -16,22 +16,42 @@
         }
         [x-cloak] { display: none !important; }
 
+        /* Controls Bar */
         .controls { 
             background: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; 
-            display: flex; gap: 15px; align-items: center; flex-shrink: 0; 
+            display: flex; gap: 15px; align-items: center; flex-shrink: 0; flex-wrap: wrap;
             box-shadow: 0 1px 2px rgba(0,0,0,0.05); 
         }
-        select { padding: 8px; min-width: 200px; border: 1px solid #ccc; border-radius: 4px; background-color: white; }
+        .control-group { display: flex; align-items: center; gap: 8px; border-right: 1px solid #eee; padding-right: 15px; }
+        .control-group:last-child { border-right: none; }
         
-        button.btn-search {
+        select { padding: 8px; min-width: 150px; border: 1px solid #ccc; border-radius: 4px; background-color: white; }
+        
+        button.btn-primary {
             background-color: #1a73e8; color: white; border: none; padding: 8px 16px; 
             border-radius: 4px; cursor: pointer; font-weight: 500; transition: background 0.1s;
         }
-        button.btn-search:hover { background-color: #1557b0; }
-        button.btn-search:disabled { background-color: #ccc; cursor: not-allowed; }
+        button.btn-primary:hover { background-color: #1557b0; }
+        
+        /* Range Slider for Height */
+        .range-slider { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #555; }
+        input[type=range] { width: 100px; }
 
         #status { margin-left: auto; color: #666; font-size: 14px; white-space: nowrap; }
 
+        /* --- NEW: Header Viewport --- */
+        .header-viewport {
+            flex-shrink: 0; /* Prevent shrinking */
+            overflow: hidden; /* Hide scrollbars */
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-bottom: none; /* Connect to viewport */
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            z-index: 10;
+            position: relative;
+        }
+
+        /* Viewport & Table */
         #viewport { 
             flex-grow: 1; overflow: auto; background: white; 
             box-shadow: 0 1px 3px rgba(0,0,0,0.1); position: relative; border: 1px solid #dee2e6; 
@@ -39,70 +59,124 @@
         
         .spacer { width: 1px; }
 
-        table { border-collapse: collapse; table-layout: fixed; width: 100%; position: absolute; top: 0; left: 0; }
+        table { 
+            border-collapse: separate; 
+            border-spacing: 0;
+            table-layout: fixed; 
+            min-width: 100%; 
+            /* Note: Position absolute is only for the body table now */
+        }
+        
+        /* Ensure Header Table resets absolute positioning if inherited */
+        .header-viewport table {
+            position: static;
+        }
+        #viewport table {
+            position: absolute; top: 0; left: 0; 
+        }
         
         th, td { 
             border-right: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0; 
-            padding: 0 8px; text-align: left; white-space: nowrap; overflow: hidden; 
-            text-overflow: ellipsis; height: 30px; box-sizing: border-box; font-size: 13px; 
+            padding: 0 8px; text-align: left; 
+            box-sizing: border-box; font-size: 13px; 
+            position: relative;
         }
-        
-        thead { position: sticky; top: 0; z-index: 2; background: #f8f9fa; display: block; }
-        thead tr { display: flex; }
-        thead th { 
-            flex: 1; border-bottom: 2px solid #ccc; display: flex; align-items: center; 
+
+        /* Header Styling */
+        th { 
+            background: #f8f9fa; 
+            border-bottom: 1px solid #ccc; 
             font-weight: 600; color: #444; user-select: none;
+            height: 35px; /* Fixed header height */
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Column Resizer Handle */
+        .resizer {
+            position: absolute; right: 0; top: 0; bottom: 0; width: 5px;
+            cursor: col-resize; user-select: none; z-index: 11;
+        }
+        .resizer:hover, .is-resizing .resizer { background-color: #1a73e8; }
+
+        /* Body Styling */
+        tbody tr { background: white; }
+        tbody tr:hover { background-color: #f1f3f4; }
+
+        /* Cell Content Handling */
+        .cell-content {
+            width: 100%; height: 100%;
+            display: flex; align-items: center;
         }
         
-        tbody tr { display: flex; background: white; }
-        tbody td { flex: 1; display: flex; align-items: center; }
-        tbody tr:hover { background-color: #e8f0fe; }
+        /* Truncate Mode (Not used by default anymore, but kept for logic) */
+        .mode-truncate .cell-content {
+            white-space: nowrap; overflow: hidden; display: block; 
+            text-overflow: ellipsis; line-height: inherit;
+        }
+        
+        /* Wrap Mode (Default now) */
+        .mode-wrap .cell-content {
+            white-space: normal; word-break: break-word; display: block;
+            overflow: hidden; 
+        }
 
         .col-index { 
-            width: 60px !important; flex: none !important; color: #999; justify-content: center; 
-            background: #fcfcfc; border-right: 2px solid #e0e0e0; user-select: none; 
+            background: #fcfcfc; border-right: 2px solid #e0e0e0; color: #999; text-align: center;
         }
+
         .type-null { color: #aaa; font-style: italic; }
-        .type-number { justify-content: flex-end; color: #1a73e8; font-variant-numeric: tabular-nums; }
+        .type-number { text-align: right; color: #1a73e8; font-variant-numeric: tabular-nums; }
         .type-blob { color: #d93025; font-family: monospace; font-size: 11px; }
 
+        /* Modal Styles (Search) */
         .modal-overlay { 
             position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; 
             background-color: rgba(0,0,0,0.3); display: flex; align-items: flex-start; 
             justify-content: center; padding-top: 80px; backdrop-filter: blur(2px);
         }
-        
         .modal-content { 
             background-color: #fff; padding: 20px; border-radius: 12px; 
             box-shadow: 0 10px 25px rgba(0,0,0,0.2); width: 450px; display: flex; 
             flex-direction: column; gap: 15px; 
         }
-
         .modal-header { display: flex; justify-content: space-between; align-items: center; }
         .modal-title { font-weight: 600; font-size: 18px; color: #333; }
         .modal-hint { font-size: 12px; color: #666; background: #f0f0f0; padding: 4px 8px; border-radius: 4px; }
-        
         #modalSearchInput { 
             padding: 12px; font-size: 16px; border: 2px solid #1a73e8; border-radius: 8px; 
             width: 100%; box-sizing: border-box; outline: none; 
         }
-        
         .modal-footer { display: flex; justify-content: space-between; font-size: 13px; color: #666; }
     </style>
 </head>
-<body x-data="dbViewer">
+<body x-data="dbViewer" :class="{ 'is-resizing': resizingCol !== -1 }">
 
     <div class="controls">
-        <input type="file" @change="loadFile($event)" accept=".db,.sqlite,.sqlite3">
+        <div class="control-group">
+            <input type="file" @change="loadFile($event)" accept=".db,.sqlite,.sqlite3">
+        </div>
         
-        <select x-show="tables.length > 0" x-model="currentTable" @change="loadTable()" x-cloak>
-            <option value="" disabled selected>Select Table</option>
-            <template x-for="t in tables" :key="t">
-                <option :value="t" x-text="t"></option>
-            </template>
-        </select>
+        <div class="control-group" x-show="tables.length > 0" x-cloak>
+            <select x-model="currentTable" @change="loadTable()">
+                <option value="" disabled selected>Select Table</option>
+                <template x-for="t in tables" :key="t">
+                    <option :value="t" x-text="t"></option>
+                </template>
+            </select>
+        </div>
+
+        <div class="control-group" x-show="totalRows > 0" x-cloak>
+            <div class="range-slider" title="Adjust Row Height">
+                <span>Height:</span>
+                <input type="range" min="30" max="150" x-model.number="rowHeight" @input="updateScroll">
+                <span x-text="`${rowHeight}px`"></span>
+            </div>
+            
+            </div>
         
-        <button class="btn-search" 
+        <button class="btn-primary" 
                 x-show="totalRows > 0" 
                 @click="openSearch" 
                 x-cloak>
@@ -112,25 +186,43 @@
         <span id="status" x-text="statusText"></span>
     </div>
     
-    <div id="viewport" x-virtual-scroll="{ rowHeight: 30, buffer: 15, handler: 'updateSlice' }">
-        
-        <div class="spacer" :style="`height: ${totalRows * 30}px`"></div>
-        
-        <table id="grid" :style="`transform: translateY(${offsetY}px)`">
+    <div class="header-viewport" x-ref="headerPane" x-show="columns.length > 0">
+        <table :style="`width: ${getTableWidth()}px`">
             <thead>
                 <tr>
-                    <th class="col-index">#</th>
-                    <template x-for="col in columns" :key="col">
-                        <th x-text="col" :title="col"></th>
+                    <th class="col-index" style="width: 60px">#</th>
+                    <template x-for="(col, idx) in columns" :key="col">
+                        <th :style="`width: ${colWidths[idx]}px`">
+                            <span x-text="col" style="padding-right: 5px;"></span>
+                            <div class="resizer" @mousedown.stop.prevent="startResize($event, idx)"></div>
+                        </th>
                     </template>
                 </tr>
             </thead>
-            <tbody>
-                <template x-for="row in rows" :key="row[0]">
-                    <tr>
-                        <td class="col-index" x-text="row[0]"></td>
-                        <template x-for="(val, idx) in row.slice(1)">
-                            <td :class="getCellClass(val)" x-text="formatCell(val)"></td>
+        </table>
+    </div>
+
+    <div id="viewport" 
+         x-virtual-scroll="{ buffer: 10, handler: 'updateSlice' }"
+         @scroll="syncHeader">
+        
+        <div class="spacer" :style="`height: ${totalRows * rowHeight}px; width: 1px`"></div>
+        
+        <table id="grid" :style="`transform: translateY(${offsetY}px); width: ${getTableWidth()}px`">
+            <tbody :class="wrapText ? 'mode-wrap' : 'mode-truncate'">
+                <template x-for="(row, rIdx) in rows" :key="row[0]">
+                    <tr :style="`height: ${rowHeight}px`">
+                        <td class="col-index" x-text="row[0]" style="width: 60px"></td>
+                        
+                        <template x-for="(val, cIdx) in row.slice(1)">
+                            <td :class="getCellClass(val)" 
+                                :style="`width: ${colWidths[cIdx]}px`">
+                                
+                                <div class="cell-content" 
+                                     x-text="formatCell(val)"
+                                     :style="`line-height: ${wrapText ? '1.2' : rowHeight + 'px'}`">
+                                </div>
+                            </td>
                         </template>
                     </tr>
                 </template>
@@ -177,7 +269,6 @@
             let opts = {};
             config(result => { opts = result });
 
-            const rowHeight = opts.rowHeight || 30;
             const buffer = opts.buffer || 15;
             const handlerName = opts.handler;
             
@@ -186,8 +277,9 @@
 
             const onScroll = () => {
                 const data = Alpine.$data(el); 
-                const total = data.totalRows; 
-                
+                const total = data.totalRows;
+                const rowHeight = data.rowHeight;
+
                 if (total === 0) return;
 
                 const scrollTop = el.scrollTop;
@@ -202,8 +294,9 @@
 
                 if (count <= 0) return;
 
-                if (renderStart !== lastStart) {
+                if (renderStart !== lastStart || data._forceUpdate) {
                     lastStart = renderStart;
+                    data._forceUpdate = false;
                     data[handlerName](renderStart, count);
                 }
             };
@@ -220,9 +313,9 @@
 
             effect(() => {
                 const data = Alpine.$data(el);
-                const _ = data.totalRows; 
-                el.scrollTop = 0;
-                lastStart = -1;
+                const _h = data.rowHeight; 
+                const _t = data.totalRows; 
+                data._forceUpdate = true; 
                 onScroll();
             });
         });
@@ -232,17 +325,40 @@
             tables: [],
             currentTable: '',
             columns: [],
+            colWidths: [],
             rows: [],
             totalRows: 0,
             offsetY: 0,
+            
+            // View Settings
+            rowHeight: 30,
+            wrapText: true, // Changed from false to true
+            
+            // Search
             isSearchOpen: false,
             searchQuery: '',
+
+            // Resize State
+            resizingCol: -1,
+            startX: 0,
+            startWidth: 0,
+            _forceUpdate: false,
 
             async init() {
                 try {
                     await init(); 
+                    window.addEventListener('mouseup', () => this.stopResize());
+                    window.addEventListener('mousemove', (e) => this.onMouseMove(e));
                 } catch(e) {
                     console.error("WASM Init Fail", e);
+                }
+            },
+
+            // --- New Helper for Syncing Header ---
+            syncHeader(e) {
+                // When body scrolls horizontally, scroll the header to match
+                if (this.$refs.headerPane) {
+                    this.$refs.headerPane.scrollLeft = e.target.scrollLeft;
                 }
             },
 
@@ -275,6 +391,9 @@
                 try {
                     this.totalRows = inspector.load_table(this.currentTable);
                     this.columns = JSON.parse(inspector.get_columns());
+                    
+                    this.colWidths = new Array(this.columns.length).fill(150);
+                    
                     this.searchQuery = "";
                     this.statusText = `${this.totalRows.toLocaleString()} rows`;
                 } catch (err) {
@@ -286,9 +405,38 @@
                 if (!inspector) return;
                 const json = inspector.get_rows_slice(start, count);
                 this.rows = JSON.parse(json);
-                this.offsetY = start * 30;
+                this.offsetY = start * this.rowHeight;
             },
 
+            // --- Resizing Logic ---
+            startResize(e, idx) {
+                this.resizingCol = idx;
+                this.startX = e.clientX;
+                this.startWidth = this.colWidths[idx];
+            },
+
+            onMouseMove(e) {
+                if (this.resizingCol === -1) return;
+                const diff = e.clientX - this.startX;
+                const newWidth = Math.max(50, this.startWidth + diff); 
+                this.colWidths[this.resizingCol] = newWidth;
+            },
+
+            stopResize() {
+                this.resizingCol = -1;
+            },
+            
+            getTableWidth() {
+                if (this.colWidths.length === 0) return '100%';
+                const sum = this.colWidths.reduce((a, b) => a + b, 0);
+                return sum + 60;
+            },
+            
+            updateScroll() {
+                this._forceUpdate = true;
+            },
+
+            // --- Search & Utils ---
             openSearch() {
                 this.isSearchOpen = true;
                 this.$nextTick(() => this.$refs.searchInput.focus());
@@ -307,6 +455,7 @@
             resetView() {
                 this.rows = [];
                 this.columns = [];
+                this.colWidths = [];
                 this.totalRows = 0;
                 this.currentTable = "";
             },
