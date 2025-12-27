@@ -20,9 +20,18 @@ fn parse_debug_struct(debug_str: &str) -> BTreeMap<String, Value> {
 
     for cap in re.captures_iter(debug_str) {
         let key = cap[1].to_string();
-        let raw_val = cap[2].trim();
+        let mut raw_val = cap[2].trim();
 
-        // Infer value type
+        if raw_val.starts_with("Some(") && raw_val.ends_with(')') {
+            raw_val = &raw_val[5..raw_val.len() - 1];
+        }
+
+        if raw_val == "None" {
+            values.insert(key, Value::Null);
+            continue;
+        }
+
+        // 3. Infer value type (using the cleaned raw_val)
         let val = if raw_val.starts_with('"') {
             // Remove quotes for text
             Value::Text(raw_val.trim_matches('"').to_string())
