@@ -76,6 +76,10 @@ impl Inspector {
             .map_err(|e| format!("Failed to list tables: {}", e))?;
 
         for name in sql_table_names {
+            if name.ends_with("DBSchema") {
+                continue;
+            }
+
             // Avoid overwriting a Virtual table if one exists with the same name
             // (Unlikely given Schema naming conventions, but good safety).
             if !tables.contains_key(&name) {
