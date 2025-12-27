@@ -3,6 +3,7 @@ use regex::Regex;
 use sqlite_wasm_reader::{Database, SelectQuery, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
+use std::sync::OnceLock;
 
 // Define the signature for a loader function.
 // It takes a reference to the database and returns a tuple of (Column Names, Rows).
@@ -14,8 +15,10 @@ pub type TableLoader = Box<
 
 /// Parses the Debug string of a struct to extract fields as Values.
 fn parse_debug_struct(debug_str: &str) -> BTreeMap<String, Value> {
+    static RE: OnceLock<Regex> = OnceLock::new();
     // Regex to capture "key: value" pairs
-    let re = Regex::new(r"(\w+):\s*((?:\[.*?\])|(?:\{.*?\})|(?:[^,]+))").unwrap();
+    let re =
+        RE.get_or_init(|| Regex::new(r"(\w+):\s*((?:\[.*?\])|(?:\{.*?\})|(?:[^,]+))").unwrap());
     let mut values = BTreeMap::new();
 
     for cap in re.captures_iter(debug_str) {
