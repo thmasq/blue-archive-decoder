@@ -214,8 +214,6 @@
 
     <script type="module">
         import init, { Inspector } from './pkg/blue_archive_decoder.js'; 
-        // Note: Change './pkg/blue_archive_decoder.js' to whatever your package name is 
-        // (often it defaults to the crate name in Cargo.toml).
 
         const ROW_HEIGHT = 30;
         const BUFFER_ROWS = 15;
@@ -252,32 +250,42 @@
                 const file = e.target.files[0];
                 if (!file) return;
 
-                els.status.textContent = "Loading database...";
-                
                 const reader = new FileReader();
                 reader.onload = function() {
                     try {
                         if (inspector) inspector.free();
                         
-                        // Pass Uint8Array to Rust (bindgen handles conversion to Vec<u8>)
-                        const data = new Uint8Array(reader.result);
-                        inspector = new Inspector(data);
+                        els.status.textContent = "Processing database... (This may take a few seconds)";
                         
-                        const tables = inspector.get_tables();
-                        
-                        els.tableSelect.innerHTML = '<option value="" disabled selected>Select Table</option>';
-                        tables.forEach(t => {
-                            const opt = document.createElement('option');
-                            opt.value = t;
-                            opt.textContent = t;
-                            els.tableSelect.appendChild(opt);
-                        });
-                        
-                        els.tableSelect.style.display = 'block';
-                        els.status.textContent = `Loaded. ${tables.length} tables available.`;
+                        // Use setTimeout to yield to the browser so it renders the text above
+                        setTimeout(() => {
+                            try {
+                                // Pass Uint8Array to Rust. 
+                                // Rust now loads and processes EVERYTHING here.
+                                const data = new Uint8Array(reader.result);
+                                inspector = new Inspector(data);
+                                
+                                const tables = inspector.get_tables();
+                                
+                                els.tableSelect.innerHTML = '<option value="" disabled selected>Select Table</option>';
+                                tables.forEach(t => {
+                                    const opt = document.createElement('option');
+                                    opt.value = t;
+                                    opt.textContent = t;
+                                    els.tableSelect.appendChild(opt);
+                                });
+                                
+                                els.tableSelect.style.display = 'block';
+                                els.status.textContent = `Loaded. ${tables.length} tables processed in memory.`;
+                            } catch (err) {
+                                console.error(err);
+                                els.status.textContent = "Error processing DB: " + err;
+                            }
+                        }, 50);
+
                     } catch (err) {
                         console.error(err);
-                        els.status.textContent = "Error loading DB: " + err;
+                        els.status.textContent = "Error reading file: " + err;
                     }
                 };
                 reader.readAsArrayBuffer(file);
@@ -289,28 +297,23 @@
                 if (!inspector) return;
 
                 try {
-                    els.status.textContent = `Loading ${tableName}...`;
+                    // Load table (Instant now)
+                    totalTableRows = inspector.load_table(tableName);
+                    totalVisibleRows = totalTableRows;
                     
-                    // Allow UI to update before blocking operation
-                    requestAnimationFrame(() => {
-                        // Load table (this decodes Flatbuffers if necessary)
-                        totalTableRows = inspector.load_table(tableName);
-                        totalVisibleRows = totalTableRows;
-                        
-                        // Get headers
-                        const colsJson = inspector.get_columns();
-                        currentColumns = JSON.parse(colsJson);
+                    // Get headers
+                    const colsJson = inspector.get_columns();
+                    currentColumns = JSON.parse(colsJson);
 
-                        // Reset View
-                        els.viewport.scrollTop = 0;
-                        els.modalInput.value = "";
-                        els.searchBtn.style.display = 'inline-block';
-                        
-                        renderHeader(currentColumns);
-                        updateLayout();
-                        
-                        els.status.textContent = `${totalTableRows.toLocaleString()} rows`;
-                    });
+                    // Reset View
+                    els.viewport.scrollTop = 0;
+                    els.modalInput.value = "";
+                    els.searchBtn.style.display = 'inline-block';
+                    
+                    renderHeader(currentColumns);
+                    updateLayout();
+                    
+                    els.status.textContent = `${totalTableRows.toLocaleString()} rows`;
                 } catch (err) {
                     els.status.textContent = "Error: " + err;
                 }

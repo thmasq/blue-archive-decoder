@@ -8,22 +8,19 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use wasm_bindgen::prelude::*;
 
-// Use the registry type from db_migrator
-use db_migrator::TableLoader;
+// Internal struct to hold processed table data in memory
+struct TableData {
+    columns: Vec<String>,
+    rows: Vec<Vec<Value>>,
+}
 
 #[wasm_bindgen]
 pub struct Inspector {
-    // The DB connection (wrapped cursor)
-    db: Database<Cursor<Vec<u8>>>,
+    // In-memory storage of all processed tables (Name -> Data)
+    tables: HashMap<String, TableData>,
 
-    // Registry of "Virtual" tables that need decoding
-    loaders: HashMap<String, TableLoader>,
-
-    // The master copy of data for the currently selected table
-    cached_rows: Vec<Vec<Value>>,
-    cached_columns: Vec<String>,
-
-    // Pointers to rows matching the current filter
+    // View state for the currently selected table
+    current_table_name: String,
     filtered_indices: Vec<usize>,
 }
 
@@ -31,102 +28,118 @@ pub struct Inspector {
 impl Inspector {
     #[wasm_bindgen(constructor)]
     pub fn new(file_data: Vec<u8>) -> Result<Inspector, String> {
+        // 1. Open the database temporarily
         let cursor = Cursor::new(file_data);
-        let db = Database::new(cursor).map_err(|e| format!("Failed to open DB: {}", e))?;
+        let mut db = Database::new(cursor).map_err(|e| format!("Failed to open DB: {}", e))?;
 
-        // Initialize the inspector
-        let mut inspector = Inspector {
-            db,
-            loaders: HashMap::new(),
-            cached_rows: Vec::new(),
-            cached_columns: Vec::new(),
-            filtered_indices: Vec::new(),
-        };
+        let mut tables = HashMap::new();
 
-        // Register all Flatbuffer loaders
-        db_migrator::register_loaders(&mut inspector.loaders);
+        // 2. Load and Process Virtual Tables (Flatbuffers)
+        // We get the registry of loaders and execute them all immediately.
+        let mut loaders = HashMap::new();
+        db_migrator::register_loaders(&mut loaders);
 
-        Ok(inspector)
-    }
+        for (name, loader) in loaders {
+            match loader(&mut db) {
+                Ok((cols, rows)) => {
+                    tables.insert(
+                        name,
+                        TableData {
+                            columns: cols,
+                            rows,
+                        },
+                    );
+                }
+                Err(e) => {
+                    web_sys::console::warn_1(&format!("Failed to load {}: {}", name, e).into());
+                }
+            }
+        }
 
-    /// Returns a list of all available tables (Physical SQL tables + Virtual Flatbuffer tables)
-    pub fn get_tables(&mut self) -> Result<Box<[JsValue]>, String> {
-        // 1. Get real SQL tables
-        let mut table_names: Vec<String> = self
-            .db
+        // 3. Load Physical SQL Tables
+        // Iterate over all actual tables in the DB.
+        let sql_table_names = db
             .tables()
             .map_err(|e| format!("Failed to list tables: {}", e))?;
 
-        // 2. Add virtual tables from loaders
-        for name in self.loaders.keys() {
-            if !table_names.contains(name) {
-                table_names.push(name.clone());
+        for name in sql_table_names {
+            // Avoid overwriting a Virtual table if one exists with the same name
+            // (Unlikely given Schema naming conventions, but good safety).
+            if !tables.contains_key(&name) {
+                // Fetch Columns
+                let columns = db
+                    .get_table_columns(&name)
+                    .map_err(|e| format!("Failed to get columns for {}: {}", name, e))?;
+
+                // Fetch All Rows
+                let query = SelectQuery::new(&name);
+                let raw_rows = db
+                    .execute_query(&query)
+                    .map_err(|e| format!("Failed to query data for {}: {}", name, e))?;
+
+                // Convert to Vec<Vec<Value>>
+                let rows: Vec<Vec<Value>> = raw_rows
+                    .into_iter()
+                    .map(|row| row.values().into_iter().cloned().collect())
+                    .collect();
+
+                tables.insert(name, TableData { columns, rows });
             }
         }
 
-        table_names.sort();
+        // The 'db' variable and 'file_data' (consumed by cursor) go out of scope here
+        // and are dropped, unloading the raw database from memory.
 
-        let js_array: Vec<JsValue> = table_names.into_iter().map(JsValue::from).collect();
+        Ok(Inspector {
+            tables,
+            current_table_name: String::new(),
+            filtered_indices: Vec::new(),
+        })
+    }
+
+    /// Returns a list of all available processed tables
+    pub fn get_tables(&self) -> Result<Box<[JsValue]>, String> {
+        let mut names: Vec<String> = self.tables.keys().cloned().collect();
+        names.sort();
+
+        let js_array: Vec<JsValue> = names.into_iter().map(JsValue::from).collect();
         Ok(js_array.into_boxed_slice())
     }
 
-    /// Loads a table into memory.
-    /// If it's a virtual table, it triggers the decoding logic.
-    /// If it's a real table, it runs a SELECT * query.
+    /// Selects a table for viewing.
+    /// Since data is already in memory, this is now just a lookup.
     pub fn load_table(&mut self, table_name: &str) -> Result<usize, String> {
-        // Clear previous data
-        self.cached_rows.clear();
-        self.cached_columns.clear();
-        self.filtered_indices.clear();
-
-        // Check if it is a virtual table (Flatbuffer)
-        if let Some(loader) = self.loaders.get(table_name) {
-            // Execute the closure to get data
-            let (cols, rows) = loader(&mut self.db)
-                .map_err(|e| format!("Failed to load virtual table {}: {}", table_name, e))?;
-
-            self.cached_columns = cols;
-            self.cached_rows = rows;
-        } else {
-            // Fallback: Standard SQL table
-            self.cached_columns = self
-                .db
-                .get_table_columns(table_name)
-                .map_err(|e| format!("Failed to get columns: {}", e))?;
-
-            let query = SelectQuery::new(table_name);
-            let raw_rows = self
-                .db
-                .execute_query(&query)
-                .map_err(|e| format!("Failed to query data: {}", e))?;
-
-            // Convert SQL Rows to Vec<Value> for uniform storage
-            self.cached_rows = raw_rows
-                .into_iter()
-                .map(|row| row.values().into_iter().cloned().collect())
-                .collect();
+        if !self.tables.contains_key(table_name) {
+            return Err(format!("Table not found: {}", table_name));
         }
 
-        // Initialize view with all rows
-        self.filtered_indices = (0..self.cached_rows.len()).collect();
+        self.current_table_name = table_name.to_string();
 
-        Ok(self.filtered_indices.len())
+        // Reset view to show all rows
+        let row_count = self.tables.get(table_name).unwrap().rows.len();
+        self.filtered_indices = (0..row_count).collect();
+
+        Ok(row_count)
     }
 
-    /// Simple string search filter across all columns
+    /// Simple string search filter on the currently selected table
     pub fn apply_filter(&mut self, query: &str) -> usize {
+        let table_data = match self.tables.get(&self.current_table_name) {
+            Some(t) => t,
+            None => return 0,
+        };
+
         if query.is_empty() {
-            if self.filtered_indices.len() != self.cached_rows.len() {
-                self.filtered_indices = (0..self.cached_rows.len()).collect();
+            if self.filtered_indices.len() != table_data.rows.len() {
+                self.filtered_indices = (0..table_data.rows.len()).collect();
             }
         } else {
             let q_lower = query.to_lowercase();
-            self.filtered_indices = self
-                .cached_rows
+            self.filtered_indices = table_data
+                .rows
                 .iter()
                 .enumerate()
                 .filter(|(_, row)| {
-                    // FIXED: row is &&Vec<Value> here. We must call .iter() or dereference it.
                     for val in row.iter() {
                         let text = match val {
                             Value::Text(s) => s.to_lowercase(),
@@ -148,8 +161,13 @@ impl Inspector {
     }
 
     pub fn get_columns(&self) -> Result<String, String> {
+        let table_data = self
+            .tables
+            .get(&self.current_table_name)
+            .ok_or_else(|| "No table loaded".to_string())?;
+
         let mut json = String::from("[");
-        for (i, col) in self.cached_columns.iter().enumerate() {
+        for (i, col) in table_data.columns.iter().enumerate() {
             if i > 0 {
                 json.push(',');
             }
@@ -160,6 +178,11 @@ impl Inspector {
     }
 
     pub fn get_rows_slice(&self, start: usize, count: usize) -> Result<String, String> {
+        let table_data = self
+            .tables
+            .get(&self.current_table_name)
+            .ok_or_else(|| "No table loaded".to_string())?;
+
         let end = (start + count).min(self.filtered_indices.len());
         if start >= self.filtered_indices.len() {
             return Ok("[]".to_string());
@@ -179,7 +202,7 @@ impl Inspector {
             json.push_str(&(original_index + 1).to_string());
             json.push(',');
 
-            let row = &self.cached_rows[original_index];
+            let row = &table_data.rows[original_index];
 
             for (j, val) in row.iter().enumerate() {
                 if j > 0 {
