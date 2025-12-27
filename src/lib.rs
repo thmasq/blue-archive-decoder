@@ -6,6 +6,7 @@ mod db_migrator;
 use sqlite_wasm_reader::{Database, SelectQuery, Value};
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::panic;
 use wasm_bindgen::prelude::*;
 
 // Internal struct to hold processed table data in memory
@@ -30,6 +31,12 @@ pub struct Inspector {
 impl Inspector {
     #[wasm_bindgen(constructor)]
     pub fn new(file_data: Vec<u8>) -> Result<Inspector, String> {
+        panic::set_hook(Box::new(|info| {
+            web_sys::console::error_1(&format!("Rust Panic: {}", info).into());
+        }));
+
+        web_sys::console::log_1(&"Initializing DB...".into());
+
         // 1. Open the database temporarily
         let cursor = Cursor::new(file_data);
         let mut db = Database::new(cursor).map_err(|e| format!("Failed to open DB: {}", e))?;
@@ -41,7 +48,11 @@ impl Inspector {
         let mut loaders = HashMap::new();
         db_migrator::register_loaders(&mut loaders);
 
+        web_sys::console::log_1(&format!("Registered {} loaders", loaders.len()).into());
+
         for (name, loader) in loaders {
+            web_sys::console::log_1(&format!("Loading Virtual Table: {}", name).into());
+
             match loader(&mut db) {
                 Ok((cols, rows)) => {
                     tables.insert(
@@ -68,7 +79,8 @@ impl Inspector {
             // Avoid overwriting a Virtual table if one exists with the same name
             // (Unlikely given Schema naming conventions, but good safety).
             if !tables.contains_key(&name) {
-                // Fetch Columns
+                web_sys::console::log_1(&format!("Loading Physical Table: {}", name).into());
+
                 let columns = db
                     .get_table_columns(&name)
                     .map_err(|e| format!("Failed to get columns for {}: {}", name, e))?;
@@ -89,8 +101,7 @@ impl Inspector {
             }
         }
 
-        // The 'db' variable and 'file_data' (consumed by cursor) go out of scope here
-        // and are dropped, unloading the raw database from memory.
+        web_sys::console::log_1(&"DB Init Complete.".into());
 
         Ok(Inspector {
             tables,
@@ -195,15 +206,7 @@ impl Inspector {
             .get(&self.current_table_name)
             .ok_or_else(|| "No table loaded".to_string())?;
 
-        let mut json = String::from("[");
-        for (i, col) in table_data.columns.iter().enumerate() {
-            if i > 0 {
-                json.push(',');
-            }
-            json.push_str(&format!("{:?}", col));
-        }
-        json.push(']');
-        Ok(json)
+        serde_json::to_string(&table_data.columns).map_err(|e| e.to_string())
     }
 
     pub fn get_rows_slice(&self, start: usize, count: usize) -> Result<String, String> {
@@ -241,7 +244,11 @@ impl Inspector {
                     Value::Null => json.push_str("null"),
                     Value::Integer(v) => json.push_str(&v.to_string()),
                     Value::Real(v) => json.push_str(&v.to_string()),
-                    Value::Text(v) => json.push_str(&format!("{:?}", v)),
+                    Value::Text(v) => {
+                        let s = serde_json::to_string(v)
+                            .unwrap_or_else(|_| "\"<encoding error>\"".to_string());
+                        json.push_str(&s);
+                    }
                     Value::Blob(_) => json.push_str("\"<blob>\""),
                 }
             }

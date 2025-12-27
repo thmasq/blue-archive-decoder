@@ -1,9 +1,7 @@
 use crate::blue_archive_generated::global::*;
-use regex::Regex;
 use sqlite_wasm_reader::{Database, SelectQuery, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::io::Cursor;
-use std::sync::OnceLock;
 
 // Define the signature for a loader function.
 // It takes a reference to the database and returns a tuple of (Column Names, Rows).
@@ -13,47 +11,25 @@ pub type TableLoader = Box<
     ) -> Result<(Vec<String>, Vec<Vec<Value>>), Box<dyn std::error::Error>>,
 >;
 
-/// Parses the Debug string of a struct to extract fields as Values.
-fn parse_debug_struct(debug_str: &str) -> BTreeMap<String, Value> {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    // Regex to capture "key: value" pairs
-    let re =
-        RE.get_or_init(|| Regex::new(r"(\w+):\s*((?:\[.*?\])|(?:\{.*?\})|(?:[^,]+))").unwrap());
-    let mut values = BTreeMap::new();
-
-    for cap in re.captures_iter(debug_str) {
-        let key = cap[1].to_string();
-        let mut raw_val = cap[2].trim();
-
-        if raw_val.starts_with("Some(") && raw_val.ends_with(')') {
-            raw_val = &raw_val[5..raw_val.len() - 1];
+/// Converts a serde_json::Value to a sqlite_wasm_reader::Value
+fn json_to_sqlite_value(val: &serde_json::Value) -> Value {
+    match val {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Integer(if *b { 1 } else { 0 }),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Integer(i)
+            } else if let Some(f) = n.as_f64() {
+                Value::Real(f)
+            } else {
+                // Fallback for types that fit neither (should be rare in this context)
+                Value::Text(n.to_string())
+            }
         }
-
-        if raw_val == "None" {
-            values.insert(key, Value::Null);
-            continue;
-        }
-
-        // 3. Infer value type (using the cleaned raw_val)
-        let val = if raw_val.starts_with('"') {
-            // Remove quotes for text
-            Value::Text(raw_val.trim_matches('"').to_string())
-        } else if raw_val == "true" {
-            Value::Integer(1)
-        } else if raw_val == "false" {
-            Value::Integer(0)
-        } else if let Ok(i) = raw_val.parse::<i64>() {
-            Value::Integer(i)
-        } else if let Ok(f) = raw_val.parse::<f64>() {
-            Value::Real(f)
-        } else {
-            // Arrays/Enums/Complex types -> keep as Text
-            Value::Text(raw_val.to_string())
-        };
-
-        values.insert(key, val);
+        serde_json::Value::String(s) => Value::Text(s.clone()),
+        // Serialize Arrays and Objects back to JSON strings for storage/display
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => Value::Text(val.to_string()),
     }
-    values
 }
 
 macro_rules! register_table {
@@ -65,6 +41,7 @@ macro_rules! register_table {
     };
 
     // Pattern 2: Explicit naming
+    // Note: $native_type is unused here as we serialize the flatbuffer root ($root_type) directly
     ($registry:expr, $base_name:ident, $root_type:ident, $native_type:ident) => {
         paste::paste! {
             {
@@ -95,31 +72,34 @@ macro_rules! register_table {
                             continue;
                         }
 
-                        // 3. Decode Flatbuffer Item directly (No wrapper table)
-                        // We treat the blob as the Item itself ($root_type)
+                        // 3. Decode Flatbuffer Item directly
+                        // We use the root type ($root_type / SomethingExcel) which implements Serialize
                         type RootItem<'a> = $root_type<'a>;
-                        // Note: flatbuffers::root verifies the buffer. If specific alignment or verification fails,
-                        // this might return an error.
+
+                        // Note: flatbuffers::root verifies the buffer.
                         let root = flatbuffers::root::<RootItem>(&bytes)?;
 
-                        // 4. Unpack to Native
-                        let native: $native_type = root.unpack();
+                        // 4. Serialize to JSON
+                        // We rely on the flatbuffer struct implementing Serialize (via --rust-serialize)
+                        let json_val = serde_json::to_value(&root)?;
 
-                        // 5. Parse fields
-                        let debug_str = format!("{:?}", native);
-                        let values_map = parse_debug_struct(&debug_str);
+                        if let serde_json::Value::Object(map) = json_val {
+                            if first {
+                                // Extract headers from the first row.
+                                // serde_json::Map is backed by BTreeMap, so keys are sorted alphabetically.
+                                headers = map.keys().cloned().collect();
+                                first = false;
+                            }
 
-                        if first {
-                            headers = values_map.keys().cloned().collect();
-                            first = false;
+                            // Ensure values follow header order
+                            let mut row_vec = Vec::new();
+                            for header in &headers {
+                                let val = map.get(header).unwrap_or(&serde_json::Value::Null);
+                                row_vec.push(json_to_sqlite_value(val));
+                            }
+
+                            result_rows.push(row_vec);
                         }
-
-                        // Ensure values follow header order
-                        let row_vec: Vec<Value> = headers.iter()
-                            .map(|k| values_map.get(k).cloned().unwrap_or(Value::Null))
-                            .collect();
-
-                        result_rows.push(row_vec);
                     }
 
                     Ok((headers, result_rows))
@@ -136,7 +116,7 @@ pub fn register_loaders(registry: &mut HashMap<String, TableLoader>) {
     register_table!(registry, AssistEchelonTypeConvert);
     register_table!(registry, Attendance);
     register_table!(registry, AttendanceReward);
-    register_table!(registry, AudioAnimator);
+    // register_table!(registry, AudioAnimator);
     register_table!(registry, BGM);
     register_table!(registry, BGMRaid);
     register_table!(registry, BGMUI);
@@ -162,7 +142,7 @@ pub fn register_loaders(registry: &mut HashMap<String, TableLoader>) {
     register_table!(registry, ContentsScenario);
     register_table!(registry, ContentsShortcut);
     register_table!(registry, Currency);
-    register_table!(registry, Emblem);
+    // register_table!(registry, Emblem);
     register_table!(registry, EventContentNotify);
     register_table!(registry, EventContentSpoilerPopup);
     register_table!(registry, EventContentTreasureCellReward);
@@ -174,7 +154,7 @@ pub fn register_loaders(registry: &mut HashMap<String, TableLoader>) {
     register_table!(registry, FavorLevelReward);
     register_table!(registry, FixedEchelonSetting);
     register_table!(registry, FormationLocation);
-    register_table!(registry, Ground);
+    // register_table!(registry, Ground);
     register_table!(registry, GroundModuleReward);
     register_table!(registry, IdCardBackground);
     register_table!(registry, Information);
@@ -205,12 +185,12 @@ pub fn register_loaders(registry: &mut HashMap<String, TableLoader>) {
     register_table!(registry, MiniGameRoadPuzzleRailSetReward);
     register_table!(registry, MiniGameRoadPuzzleReward);
     register_table!(registry, MiniGameRoadPuzzleVoice);
-    register_table!(registry, MiniGameDreamVoice);
-    register_table!(registry, MiniGameRoadPuzzleAdditionalReward);
+    // register_table!(registry, MiniGameDreamVoice);
+    // register_table!(registry, MiniGameRoadPuzzleAdditionalReward);
     register_table!(registry, MiniGameRoadPuzzleMap);
-    register_table!(registry, MiniGameRoadPuzzleMapTile);
-    register_table!(registry, MiniGameRoadPuzzleRailTile);
-    register_table!(registry, MiniGameRoadPuzzleRoadRound);
+    // register_table!(registry, MiniGameRoadPuzzleMapTile);
+    // register_table!(registry, MiniGameRoadPuzzleRailTile);
+    // register_table!(registry, MiniGameRoadPuzzleRoadRound);
     register_table!(registry, MissionEmergencyComplete);
     register_table!(registry, MultiFloorRaidReward);
     register_table!(registry, MultiFloorRaidSeasonManage);

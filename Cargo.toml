@@ -7,15 +7,17 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-flatbuffers = { version = "25.9.23", features = ["serde"] }
+flatbuffers = { version = "25.9.23", features = ["serde", "serialize"] }
 paste = "1.0.15"
 regex = "1.12.2"
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.147"
 sqlite_wasm_reader = { git = "https://github.com/thmasq/sqlite-wasm-reader", tag = "v0.4.3" }
 wasm-bindgen = "0.2.106"
 web-sys = { version = "0.3.83", features = ["console"] }
 
 [profile.release]
+panic = "unwind"
 lto = "fat"
 opt-level = 3
 codegen-units = 1

@@ -31,6 +31,7 @@ dependencies = [
  "paste",
  "regex",
  "serde",
+ "serde_json",
  "sqlite_wasm_reader",
  "wasm-bindgen",
  "web-sys",
@@ -87,6 +88,12 @@ dependencies = [
  "equivalent",
  "foldhash",
 ]
+
+[[package]]
+name = "itoa"
+version = "1.0.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ee5b5339afb4c41626dde77b7a611bd4f2c202b897852b4bcf5d03eddc61010"
 
 [[package]]
 name = "js-sys"
@@ -230,6 +237,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_json"
+version = "1.0.147"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6af14725505314343e673e9ecb7cd7e8a36aa9791eb936235a3567cc31447ae4"
+dependencies = [
+ "itoa",
+ "memchr",
+ "serde",
+ "serde_core",
+ "zmij",
+]
+
+[[package]]
 name = "sqlite_wasm_reader"
 version = "0.4.3"
 source = "git+https://github.com/thmasq/sqlite-wasm-reader?tag=v0.4.3#35dc0c7f42aaecc8d0b5c26acd05a5032942055d"
@@ -340,3 +360,9 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "zmij"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4af59da1029247450b54ba43e0b62c8e376582464bbe5504dd525fe521e7e8fd"
