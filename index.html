@@ -3,15 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Blue Archive Database Viewer</title>
+    <title>Blue Archive Database Viewer (Alpine.js)</title>
     <style>
-        /* --- LAYOUT & RESET --- */
-        html, body { 
-            height: 100%; 
-            margin: 0; 
-            padding: 0; 
-            overflow: hidden; 
-        }
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
         body { 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
             background: #f0f2f5; 
@@ -20,149 +14,68 @@
             padding: 20px; 
             box-sizing: border-box; 
         }
+        [x-cloak] { display: none !important; }
 
-        /* --- CONTROLS HEADER --- */
         .controls { 
-            background: white; 
-            padding: 15px; 
-            border-radius: 8px; 
-            margin-bottom: 20px; 
-            display: flex; 
-            gap: 15px; 
-            align-items: center; 
-            flex-shrink: 0; 
+            background: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; 
+            display: flex; gap: 15px; align-items: center; flex-shrink: 0; 
             box-shadow: 0 1px 2px rgba(0,0,0,0.05); 
         }
+        select { padding: 8px; min-width: 200px; border: 1px solid #ccc; border-radius: 4px; background-color: white; }
         
-        select { 
-            padding: 8px; 
-            min-width: 200px; 
-            border: 1px solid #ccc; 
-            border-radius: 4px; 
-            background-color: white;
-        }
-
         button.btn-search {
-            background-color: #1a73e8;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: 500;
-            transition: background 0.1s;
+            background-color: #1a73e8; color: white; border: none; padding: 8px 16px; 
+            border-radius: 4px; cursor: pointer; font-weight: 500; transition: background 0.1s;
         }
         button.btn-search:hover { background-color: #1557b0; }
+        button.btn-search:disabled { background-color: #ccc; cursor: not-allowed; }
 
-        #status {
-            margin-left: auto;
-            color: #666;
-            font-size: 14px;
-            white-space: nowrap;
-        }
+        #status { margin-left: auto; color: #666; font-size: 14px; white-space: nowrap; }
 
-        /* --- GRID VIEWPORT --- */
         #viewport { 
-            flex-grow: 1; 
-            overflow: auto; 
-            background: white; 
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
-            position: relative; 
-            border: 1px solid #dee2e6; 
+            flex-grow: 1; overflow: auto; background: white; 
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); position: relative; border: 1px solid #dee2e6; 
         }
+        
+        .spacer { width: 1px; }
 
-        /* --- DATA TABLE --- */
-        table { 
-            border-collapse: collapse; 
-            table-layout: fixed; 
-            width: 100%; 
-            position: absolute; 
-            top: 0; 
-            left: 0; 
-        }
-
+        table { border-collapse: collapse; table-layout: fixed; width: 100%; position: absolute; top: 0; left: 0; }
+        
         th, td { 
-            border-right: 1px solid #e0e0e0; 
-            border-bottom: 1px solid #e0e0e0; 
-            padding: 0 8px; 
-            text-align: left; 
-            white-space: nowrap; 
-            overflow: hidden; 
-            text-overflow: ellipsis; 
-            height: 30px; 
-            box-sizing: border-box; 
-            font-size: 13px; 
+            border-right: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0; 
+            padding: 0 8px; text-align: left; white-space: nowrap; overflow: hidden; 
+            text-overflow: ellipsis; height: 30px; box-sizing: border-box; font-size: 13px; 
         }
         
-        thead { 
-            position: sticky; 
-            top: 0; 
-            z-index: 2; 
-            background: #f8f9fa; 
-            display: block; 
-        }
-        
+        thead { position: sticky; top: 0; z-index: 2; background: #f8f9fa; display: block; }
         thead tr { display: flex; }
-        
         thead th { 
-            flex: 1; 
-            border-bottom: 2px solid #ccc; 
-            display: flex; 
-            align-items: center; 
-            font-weight: 600; 
-            color: #444; 
-            user-select: none;
+            flex: 1; border-bottom: 2px solid #ccc; display: flex; align-items: center; 
+            font-weight: 600; color: #444; user-select: none;
         }
         
         tbody tr { display: flex; background: white; }
         tbody td { flex: 1; display: flex; align-items: center; }
         tbody tr:hover { background-color: #e8f0fe; }
 
-        /* --- CELL TYPES --- */
         .col-index { 
-            width: 60px !important; 
-            flex: none !important; 
-            color: #999; 
-            justify-content: center; 
-            background: #fcfcfc; 
-            border-right: 2px solid #e0e0e0; 
-            user-select: none; 
+            width: 60px !important; flex: none !important; color: #999; justify-content: center; 
+            background: #fcfcfc; border-right: 2px solid #e0e0e0; user-select: none; 
         }
         .type-null { color: #aaa; font-style: italic; }
         .type-number { justify-content: flex-end; color: #1a73e8; font-variant-numeric: tabular-nums; }
         .type-blob { color: #d93025; font-family: monospace; font-size: 11px; }
 
-        /* --- SEARCH MODAL --- */
-        #searchModal { 
-            display: none; 
-            position: fixed; 
-            z-index: 1000; 
-            left: 0; 
-            top: 0; 
-            width: 100%; 
-            height: 100%; 
-            background-color: rgba(0,0,0,0.3); 
-            align-items: flex-start; 
-            justify-content: center; 
-            padding-top: 80px; 
-            backdrop-filter: blur(2px);
+        .modal-overlay { 
+            position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; 
+            background-color: rgba(0,0,0,0.3); display: flex; align-items: flex-start; 
+            justify-content: center; padding-top: 80px; backdrop-filter: blur(2px);
         }
         
-        #searchModalContent { 
-            background-color: #fff; 
-            padding: 20px; 
-            border-radius: 12px; 
-            box-shadow: 0 10px 25px rgba(0,0,0,0.2); 
-            width: 450px; 
-            display: flex; 
-            flex-direction: column; 
-            gap: 15px; 
-            animation: slideDown 0.2s ease-out; 
-        }
-        
-        @keyframes slideDown { 
-            from { transform: translateY(-20px); opacity: 0; } 
-            to { transform: translateY(0); opacity: 1; } 
+        .modal-content { 
+            background-color: #fff; padding: 20px; border-radius: 12px; 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2); width: 450px; display: flex; 
+            flex-direction: column; gap: 15px; 
         }
 
         .modal-header { display: flex; justify-content: space-between; align-items: center; }
@@ -170,314 +83,249 @@
         .modal-hint { font-size: 12px; color: #666; background: #f0f0f0; padding: 4px 8px; border-radius: 4px; }
         
         #modalSearchInput { 
-            padding: 12px; 
-            font-size: 16px; 
-            border: 2px solid #1a73e8; 
-            border-radius: 8px; 
-            width: 100%; 
-            box-sizing: border-box; 
-            outline: none; 
+            padding: 12px; font-size: 16px; border: 2px solid #1a73e8; border-radius: 8px; 
+            width: 100%; box-sizing: border-box; outline: none; 
         }
         
         .modal-footer { display: flex; justify-content: space-between; font-size: 13px; color: #666; }
     </style>
 </head>
-<body>
+<body x-data="dbViewer">
+
     <div class="controls">
-        <input type="file" id="fileInput" accept=".db,.sqlite,.sqlite3">
-        <select id="tableSelect" style="display:none"></select>
-        <button id="searchBtn" class="btn-search" style="display:none">Find / Filter</button>
-        <span id="status">Waiting for file...</span>
+        <input type="file" @change="loadFile($event)" accept=".db,.sqlite,.sqlite3">
+        
+        <select x-show="tables.length > 0" x-model="currentTable" @change="loadTable()" x-cloak>
+            <option value="" disabled selected>Select Table</option>
+            <template x-for="t in tables" :key="t">
+                <option :value="t" x-text="t"></option>
+            </template>
+        </select>
+        
+        <button class="btn-search" 
+                x-show="totalRows > 0" 
+                @click="openSearch" 
+                x-cloak>
+            Find / Filter
+        </button>
+        
+        <span id="status" x-text="statusText"></span>
     </div>
     
-    <div id="viewport">
-        <div id="spacer"></div>
-        <table id="grid">
-            <thead id="gridHead"></thead>
-            <tbody id="gridBody"></tbody>
+    <div id="viewport" x-virtual-scroll="{ rowHeight: 30, buffer: 15, handler: 'updateSlice' }">
+        
+        <div class="spacer" :style="`height: ${totalRows * 30}px`"></div>
+        
+        <table id="grid" :style="`transform: translateY(${offsetY}px)`">
+            <thead>
+                <tr>
+                    <th class="col-index">#</th>
+                    <template x-for="col in columns" :key="col">
+                        <th x-text="col" :title="col"></th>
+                    </template>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="row in rows" :key="row[0]">
+                    <tr>
+                        <td class="col-index" x-text="row[0]"></td>
+                        <template x-for="(val, idx) in row.slice(1)">
+                            <td :class="getCellClass(val)" x-text="formatCell(val)"></td>
+                        </template>
+                    </tr>
+                </template>
+            </tbody>
         </table>
     </div>
 
-    <div id="searchModal">
-        <div id="searchModalContent">
+    <div class="modal-overlay" 
+         x-show="isSearchOpen" 
+         x-transition.opacity
+         @click.self="closeSearch"
+         @keydown.escape.window="closeSearch"
+         @keydown.window="if (($event.ctrlKey || $event.metaKey) && $event.key === 'f') { $event.preventDefault(); openSearch(); }"
+         x-cloak>
+         
+        <div class="modal-content" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 translate-y-[-20px]" x-transition:enter-end="opacity-100 translate-y-0">
             <div class="modal-header">
                 <span class="modal-title">Filter Table</span>
                 <span class="modal-hint">ESC to close</span>
             </div>
-            <input type="text" id="modalSearchInput" placeholder="Type to filter rows..." autocomplete="off">
+            
+            <input type="text" 
+                   id="modalSearchInput" 
+                   x-ref="searchInput"
+                   placeholder="Type to filter rows..." 
+                   autocomplete="off"
+                   x-model="searchQuery"
+                   @input.debounce.150ms="applyFilter">
+                   
             <div class="modal-footer">
-                <span id="matchCount">Ready</span>
+                <span x-text="searchQuery === '' ? 'Showing all rows' : `${totalRows.toLocaleString()} matches found`"></span>
             </div>
         </div>
     </div>
 
     <script type="module">
         import init, { Inspector } from './pkg/blue_archive_decoder.js'; 
-
-        const ROW_HEIGHT = 30;
-        const BUFFER_ROWS = 15;
+        import Alpine from 'https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/module.esm.js';
 
         let inspector = null;
-        let isRendering = false;
-        
-        // State
-        let totalVisibleRows = 0;
-        let totalTableRows = 0;
-        let currentColumns = [];
 
-        // DOM Elements
-        const els = {
-            fileInput: document.getElementById('fileInput'),
-            tableSelect: document.getElementById('tableSelect'),
-            searchBtn: document.getElementById('searchBtn'),
-            status: document.getElementById('status'),
-            viewport: document.getElementById('viewport'),
-            spacer: document.getElementById('spacer'),
-            grid: document.getElementById('grid'),
-            gridHead: document.getElementById('gridHead'),
-            gridBody: document.getElementById('gridBody'),
-            modal: document.getElementById('searchModal'),
-            modalInput: document.getElementById('modalSearchInput'),
-            matchCount: document.getElementById('matchCount'),
-        };
+        Alpine.directive('virtual-scroll', (el, { expression }, { evaluateLater, effect }) => {
+            const config = evaluateLater(expression);
+            let opts = {};
+            config(result => { opts = result });
 
-        async function main() {
-            await init();
+            const rowHeight = opts.rowHeight || 30;
+            const buffer = opts.buffer || 15;
+            const handlerName = opts.handler;
+            
+            let lastStart = -1;
+            let isScrolling = false;
 
-            // 1. File Loading
-            els.fileInput.addEventListener('change', async (e) => {
-                const file = e.target.files[0];
+            const onScroll = () => {
+                const data = Alpine.$data(el); 
+                const total = data.totalRows; 
+                
+                if (total === 0) return;
+
+                const scrollTop = el.scrollTop;
+                const clientHeight = el.clientHeight;
+                
+                const startNode = Math.floor(scrollTop / rowHeight);
+                const endNode = Math.min(total, Math.ceil((scrollTop + clientHeight) / rowHeight));
+
+                const renderStart = Math.max(0, startNode - buffer);
+                const renderEnd = Math.min(total, endNode + buffer);
+                const count = renderEnd - renderStart;
+
+                if (count <= 0) return;
+
+                if (renderStart !== lastStart) {
+                    lastStart = renderStart;
+                    data[handlerName](renderStart, count);
+                }
+            };
+
+            el.addEventListener('scroll', () => {
+                if(!isScrolling) {
+                    requestAnimationFrame(() => {
+                        onScroll();
+                        isScrolling = false;
+                    });
+                    isScrolling = true;
+                }
+            });
+
+            effect(() => {
+                const data = Alpine.$data(el);
+                const _ = data.totalRows; 
+                el.scrollTop = 0;
+                lastStart = -1;
+                onScroll();
+            });
+        });
+
+        Alpine.data('dbViewer', () => ({
+            statusText: 'Waiting for file...',
+            tables: [],
+            currentTable: '',
+            columns: [],
+            rows: [],
+            totalRows: 0,
+            offsetY: 0,
+            isSearchOpen: false,
+            searchQuery: '',
+
+            async init() {
+                try {
+                    await init(); 
+                } catch(e) {
+                    console.error("WASM Init Fail", e);
+                }
+            },
+
+            loadFile(event) {
+                const file = event.target.files[0];
                 if (!file) return;
-
+                
                 const reader = new FileReader();
-                reader.onload = function() {
+                this.statusText = "Processing database...";
+                
+                reader.onload = () => {
                     try {
                         if (inspector) inspector.free();
+                        const data = new Uint8Array(reader.result);
+                        inspector = new Inspector(data);
                         
-                        els.status.textContent = "Processing database... (This may take a few seconds)";
-                        
-                        // Use setTimeout to yield to the browser so it renders the text above
-                        setTimeout(() => {
-                            try {
-                                // Pass Uint8Array to Rust. 
-                                // Rust now loads and processes EVERYTHING here.
-                                const data = new Uint8Array(reader.result);
-                                inspector = new Inspector(data);
-                                
-                                const tables = inspector.get_tables();
-                                
-                                els.tableSelect.innerHTML = '<option value="" disabled selected>Select Table</option>';
-                                tables.forEach(t => {
-                                    const opt = document.createElement('option');
-                                    opt.value = t;
-                                    opt.textContent = t;
-                                    els.tableSelect.appendChild(opt);
-                                });
-                                
-                                els.tableSelect.style.display = 'block';
-                                els.status.textContent = `Loaded. ${tables.length} tables processed in memory.`;
-                            } catch (err) {
-                                console.error(err);
-                                els.status.textContent = "Error processing DB: " + err;
-                            }
-                        }, 50);
-
+                        this.tables = inspector.get_tables();
+                        this.statusText = `Loaded. ${this.tables.length} tables found.`;
+                        this.resetView();
                     } catch (err) {
                         console.error(err);
-                        els.status.textContent = "Error reading file: " + err;
+                        this.statusText = "Error: " + err;
                     }
                 };
                 reader.readAsArrayBuffer(file);
-            });
+            },
 
-            // 2. Table Selection
-            els.tableSelect.addEventListener('change', (e) => {
-                const tableName = e.target.value;
-                if (!inspector) return;
-
+            loadTable() {
+                if (!inspector || !this.currentTable) return;
                 try {
-                    // Load table (Instant now)
-                    totalTableRows = inspector.load_table(tableName);
-                    totalVisibleRows = totalTableRows;
-                    
-                    // Get headers
-                    const colsJson = inspector.get_columns();
-                    currentColumns = JSON.parse(colsJson);
-
-                    // Reset View
-                    els.viewport.scrollTop = 0;
-                    els.modalInput.value = "";
-                    els.searchBtn.style.display = 'inline-block';
-                    
-                    renderHeader(currentColumns);
-                    updateLayout();
-                    
-                    els.status.textContent = `${totalTableRows.toLocaleString()} rows`;
+                    this.totalRows = inspector.load_table(this.currentTable);
+                    this.columns = JSON.parse(inspector.get_columns());
+                    this.searchQuery = "";
+                    this.statusText = `${this.totalRows.toLocaleString()} rows`;
                 } catch (err) {
-                    els.status.textContent = "Error: " + err;
+                    this.statusText = "Error loading table: " + err;
                 }
-            });
+            },
 
-            // 3. Virtual Scrolling
-            els.viewport.addEventListener('scroll', onScroll);
+            updateSlice(start, count) {
+                if (!inspector) return;
+                const json = inspector.get_rows_slice(start, count);
+                this.rows = JSON.parse(json);
+                this.offsetY = start * 30;
+            },
 
-            function onScroll() {
-                if (!isRendering) {
-                    requestAnimationFrame(renderChunk);
-                    isRendering = true;
-                }
+            openSearch() {
+                this.isSearchOpen = true;
+                this.$nextTick(() => this.$refs.searchInput.focus());
+            },
+            
+            closeSearch() {
+                this.isSearchOpen = false;
+            },
+
+            applyFilter() {
+                if (!inspector) return;
+                this.totalRows = inspector.apply_filter(this.searchQuery);
+                this.statusText = `${this.totalRows.toLocaleString()} rows (filtered)`;
+            },
+
+            resetView() {
+                this.rows = [];
+                this.columns = [];
+                this.totalRows = 0;
+                this.currentTable = "";
+            },
+
+            getCellClass(val) {
+                if (val === null) return 'type-null';
+                if (typeof val === 'number') return 'type-number';
+                if (val === "<blob>") return 'type-blob';
+                return '';
+            },
+
+            formatCell(val) {
+                if (val === null) return 'NULL';
+                if (val === "<blob>") return 'BLOB';
+                return val;
             }
+        }));
 
-            function updateLayout() {
-                els.spacer.style.height = `${totalVisibleRows * ROW_HEIGHT}px`;
-                renderChunk();
-            }
-
-            function renderChunk() {
-                if (totalVisibleRows === 0) {
-                    els.gridBody.innerHTML = '';
-                    isRendering = false;
-                    return;
-                }
-
-                const scrollTop = els.viewport.scrollTop;
-                const clientHeight = els.viewport.clientHeight;
-
-                // Calculate which rows to show
-                const startIndex = Math.floor(scrollTop / ROW_HEIGHT);
-                const endIndex = Math.min(totalVisibleRows, Math.ceil((scrollTop + clientHeight) / ROW_HEIGHT));
-
-                // Add buffer
-                const renderStart = Math.max(0, startIndex - BUFFER_ROWS);
-                const renderEnd = Math.min(totalVisibleRows, endIndex + BUFFER_ROWS);
-                const count = renderEnd - renderStart;
-
-                if (count <= 0) {
-                    els.gridBody.innerHTML = '';
-                    isRendering = false;
-                    return;
-                }
-
-                // Fetch data slice from Rust
-                // Returns JSON: [[original_index, col1, col2...], ...]
-                const json = inspector.get_rows_slice(renderStart, count);
-                const rows = JSON.parse(json);
-
-                // Position the table
-                els.grid.style.transform = `translateY(${renderStart * ROW_HEIGHT}px)`;
-
-                // Build DOM
-                const fragment = document.createDocumentFragment();
-                
-                rows.forEach(row => {
-                    const tr = document.createElement('tr');
-                    tr.style.height = `${ROW_HEIGHT}px`;
-
-                    // First element is the original index (1-based)
-                    const indexVal = row[0];
-                    const tdIndex = document.createElement('td');
-                    tdIndex.className = 'col-index';
-                    tdIndex.textContent = indexVal;
-                    tr.appendChild(tdIndex);
-
-                    // Subsequent elements are columns
-                    for (let i = 1; i < row.length; i++) {
-                        const val = row[i];
-                        const td = document.createElement('td');
-                        
-                        if (val === null) {
-                            td.textContent = "NULL";
-                            td.className = "type-null";
-                        } else if (typeof val === 'number') {
-                            td.textContent = val;
-                            td.className = "type-number";
-                        } else if (val === "<blob>") {
-                            td.textContent = "BLOB";
-                            td.className = "type-blob";
-                        } else {
-                            td.textContent = val;
-                        }
-                        tr.appendChild(td);
-                    }
-                    fragment.appendChild(tr);
-                });
-
-                els.gridBody.innerHTML = '';
-                els.gridBody.appendChild(fragment);
-                isRendering = false;
-            }
-
-            function renderHeader(cols) {
-                els.gridHead.innerHTML = '';
-                const tr = document.createElement('tr');
-                tr.style.height = `${ROW_HEIGHT}px`;
-
-                // Index Column Header
-                const thIndex = document.createElement('th');
-                thIndex.textContent = "#";
-                thIndex.className = "col-index";
-                tr.appendChild(thIndex);
-
-                cols.forEach(col => {
-                    const th = document.createElement('th');
-                    th.textContent = col;
-                    th.title = col; // Tooltip for long names
-                    tr.appendChild(th);
-                });
-                els.gridHead.appendChild(tr);
-            }
-
-            // 4. Search / Filter Logic
-            els.searchBtn.addEventListener('click', () => {
-                if (!inspector || totalTableRows === 0) return;
-                els.modal.style.display = 'flex';
-                els.modalInput.focus();
-                els.modalInput.select();
-            });
-
-            function closeModal() {
-                els.modal.style.display = 'none';
-                els.viewport.focus();
-            }
-
-            els.modal.addEventListener('click', (e) => {
-                if (e.target === els.modal) closeModal();
-            });
-
-            window.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') closeModal();
-                if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-                    e.preventDefault();
-                    if (inspector && totalTableRows > 0) els.searchBtn.click();
-                }
-            });
-
-            let debounceTimer;
-            els.modalInput.addEventListener('input', (e) => {
-                const query = e.target.value;
-                
-                clearTimeout(debounceTimer);
-                debounceTimer = setTimeout(() => {
-                    if (!inspector) return;
-                    
-                    // Run filter in Rust
-                    totalVisibleRows = inspector.apply_filter(query);
-                    
-                    // Reset scroll to top to ensure we see results
-                    els.viewport.scrollTop = 0;
-                    
-                    updateLayout();
-                    
-                    const countStr = totalVisibleRows.toLocaleString();
-                    els.matchCount.textContent = query === "" 
-                        ? "Showing all rows" 
-                        : `${countStr} matches found`;
-                    els.status.textContent = `${countStr} rows (filtered)`;
-                }, 150); // Small debounce for typing comfort
-            });
-        }
-
-        main().catch(console.error);
+        Alpine.start();
     </script>
 </body>
 </html>
