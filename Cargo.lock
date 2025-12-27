@@ -220,8 +220,8 @@ dependencies = [
 
 [[package]]
 name = "sqlite_wasm_reader"
-version = "0.4.2"
-source = "git+https://github.com/thmasq/sqlite-wasm-reader?tag=v0.4.2#c30cb0ac9b8ba882dc06c97284fe595b0bbc3c6b"
+version = "0.4.3"
+source = "git+https://github.com/thmasq/sqlite-wasm-reader?tag=v0.4.3#35dc0c7f42aaecc8d0b5c26acd05a5032942055d"
 dependencies = [
  "byteorder",
  "lru",
