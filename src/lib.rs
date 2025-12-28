@@ -3,9 +3,11 @@ extern crate alloc;
 mod blue_archive_generated;
 mod db_migrator;
 
+use regex::Regex;
 use sqlite_wasm_reader::{Database, SelectQuery, Value};
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::io::Write;
 use std::panic;
 use wasm_bindgen::prelude::*;
 
@@ -25,6 +27,9 @@ pub struct Inspector {
     filtered_indices: Vec<usize>,
 
     last_query: String,
+
+    #[wasm_bindgen(skip)]
+    cached_regex: Option<Regex>,
 }
 
 #[wasm_bindgen]
@@ -112,6 +117,7 @@ impl Inspector {
             current_table_name: String::new(),
             filtered_indices: Vec::new(),
             last_query: String::new(),
+            cached_regex: None,
         })
     }
 
@@ -125,7 +131,6 @@ impl Inspector {
     }
 
     /// Selects a table for viewing.
-    /// Since data is already in memory, this is now just a lookup.
     pub fn load_table(&mut self, table_name: &str) -> Result<usize, String> {
         if !self.tables.contains_key(table_name) {
             return Err(format!("Table not found: {}", table_name));
@@ -133,71 +138,88 @@ impl Inspector {
 
         self.current_table_name = table_name.to_string();
 
-        // Reset view to show all rows
         let row_count = self.tables.get(table_name).unwrap().rows.len();
         self.filtered_indices = (0..row_count).collect();
 
         self.last_query.clear();
+        self.cached_regex = None;
 
         Ok(row_count)
     }
 
-    /// String search filter with Iterative Filtering
+    /// String search
     pub fn apply_filter(&mut self, query: &str) -> usize {
         let table_data = match self.tables.get(&self.current_table_name) {
             Some(t) => t,
             None => return 0,
         };
 
-        let q_lower = query.to_lowercase();
-
         if query.is_empty() {
-            // Reset to full set if we aren't already there
             if self.filtered_indices.len() != table_data.rows.len() {
                 self.filtered_indices = (0..table_data.rows.len()).collect();
             }
             self.last_query.clear();
-        } else {
-            // Check optimization: Is the new query a refinement of the old one?
-            // If yes, we can scan ONLY the currently filtered indices.
-            let is_refinement =
-                !self.last_query.is_empty() && q_lower.starts_with(&self.last_query);
-
-            if is_refinement {
-                // O(Filtered_Rows * Cols) - Iterative
-                self.filtered_indices.retain(|&index| {
-                    let row = &table_data.rows[index];
-                    Inspector::row_matches(row, &q_lower)
-                });
-            } else {
-                // O(Total_Rows * Cols) - Full Scan
-                // Occurs on first search, backspace, or paste
-                self.filtered_indices = table_data
-                    .rows
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, row)| Inspector::row_matches(row, &q_lower))
-                    .map(|(index, _)| index)
-                    .collect();
-            }
-
-            // Update history
-            self.last_query = q_lower;
+            self.cached_regex = None;
+            return self.filtered_indices.len();
         }
+
+        // Initialize or Update Regex
+        if self.cached_regex.is_none() || query != self.last_query {
+            let re = regex::RegexBuilder::new(query)
+                .case_insensitive(true)
+                .build()
+                .or_else(|_| {
+                    regex::RegexBuilder::new(&regex::escape(query))
+                        .case_insensitive(true)
+                        .build()
+                })
+                .ok();
+
+            self.cached_regex = re;
+            self.last_query = query.to_string();
+        }
+
+        let re = match &self.cached_regex {
+            Some(r) => r,
+            None => return 0,
+        };
+
+        self.filtered_indices = table_data
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| Inspector::row_matches(row, re))
+            .map(|(index, _)| index)
+            .collect();
 
         self.filtered_indices.len()
     }
 
-    // Helper to check if a row matches the query string
-    fn row_matches(row: &[Value], q_lower: &str) -> bool {
+    fn row_matches(row: &[Value], re: &Regex) -> bool {
         for val in row.iter() {
-            let text = match val {
-                Value::Text(s) => s.to_lowercase(),
-                Value::Integer(i) => i.to_string(),
-                Value::Real(f) => f.to_string(),
-                _ => String::new(),
+            let matches = match val {
+                Value::Text(s) => re.is_match(s),
+                Value::Integer(i) => {
+                    let mut buf = [0u8; 32];
+                    let mut cursor = Cursor::new(&mut buf[..]);
+                    let _ = write!(cursor, "{}", i);
+                    let len = cursor.position() as usize;
+                    // Integers are always valid UTF-8
+                    let s = unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
+                    re.is_match(s)
+                }
+                Value::Real(f) => {
+                    let mut buf = [0u8; 64];
+                    let mut cursor = Cursor::new(&mut buf[..]);
+                    let _ = write!(cursor, "{}", f);
+                    let len = cursor.position() as usize;
+                    let s = unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
+                    re.is_match(s)
+                }
+                _ => false,
             };
-            if text.contains(q_lower) {
+
+            if matches {
                 return true;
             }
         }

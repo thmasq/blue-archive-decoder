@@ -202,7 +202,7 @@
         </table>
     </div>
 
-    <div id="viewport" 
+    <div id="viewport" x-ref="viewport"
          x-virtual-scroll="{ buffer: 10, handler: 'updateSlice' }"
          @scroll="syncHeader">
         
@@ -403,6 +403,11 @@
                     
                     this.searchQuery = "";
                     this.statusText = `${this.totalRows.toLocaleString()} rows`;
+
+                    if (this.$refs.viewport) {
+                        this.$refs.viewport.scrollTop = 0;
+                    }
+
                 } catch (err) {
                     this.statusText = "Error loading table: " + err;
                 }
@@ -457,6 +462,10 @@
                 if (!inspector) return;
                 this.totalRows = inspector.apply_filter(this.searchQuery);
                 this.statusText = `${this.totalRows.toLocaleString()} rows (filtered)`;
+
+                if (this.$refs.viewport) {
+                    this.$refs.viewport.scrollTop = 0;
+                }
             },
 
             resetView() {
