@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Blue Archive Database Viewer (Fixed)</title>
+    <title>Blue Archive Database Viewer (Direct DOM)</title>
     <style>
         html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
         body { 
@@ -16,7 +16,6 @@
         }
         [x-cloak] { display: none !important; }
 
-        /* Controls Bar */
         .controls { 
             background: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; 
             display: flex; gap: 15px; align-items: center; flex-shrink: 0; flex-wrap: wrap;
@@ -33,25 +32,22 @@
         }
         button.btn-primary:hover { background-color: #1557b0; }
         
-        /* Range Slider for Height */
         .range-slider { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #555; }
         input[type=range] { width: 100px; }
 
         #status { margin-left: auto; color: #666; font-size: 14px; white-space: nowrap; }
 
-        /* --- NEW: Header Viewport --- */
         .header-viewport {
-            flex-shrink: 0; /* Prevent shrinking */
-            overflow: hidden; /* Hide scrollbars */
+            flex-shrink: 0; 
+            overflow: hidden; 
             background: #f8f9fa;
             border: 1px solid #dee2e6;
-            border-bottom: none; /* Connect to viewport */
+            border-bottom: none;
             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
             z-index: 10;
             position: relative;
         }
 
-        /* Viewport & Table */
         #viewport { 
             flex-grow: 1; overflow: auto; background: white; 
             box-shadow: 0 1px 3px rgba(0,0,0,0.1); position: relative; border: 1px solid #dee2e6; 
@@ -62,18 +58,12 @@
         table { 
             border-collapse: separate; 
             border-spacing: 0;
-            table-layout: fixed; 
+            table-layout: fixed;
             min-width: 100%; 
-            /* Note: Position absolute is only for the body table now */
         }
         
-        /* Ensure Header Table resets absolute positioning if inherited */
-        .header-viewport table {
-            position: static;
-        }
-        #viewport table {
-            position: absolute; top: 0; left: 0; 
-        }
+        .header-viewport table { position: static; }
+        #viewport table { position: absolute; top: 0; left: 0; }
         
         th, td { 
             border-right: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0; 
@@ -82,41 +72,35 @@
             position: relative;
         }
 
-        /* Header Styling */
         th { 
             background: #f8f9fa; 
             border-bottom: 1px solid #ccc; 
             font-weight: 600; color: #444; user-select: none;
-            height: 35px; /* Fixed header height */
+            height: 35px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
-        /* Column Resizer Handle */
         .resizer {
             position: absolute; right: 0; top: 0; bottom: 0; width: 5px;
             cursor: col-resize; user-select: none; z-index: 11;
         }
         .resizer:hover, .is-resizing .resizer { background-color: #1a73e8; }
 
-        /* Body Styling */
         tbody tr { background: white; }
         tbody tr:hover { background-color: #f1f3f4; }
 
-        /* Cell Content Handling */
         .cell-content {
             width: 100%; height: 100%;
             display: flex; align-items: center;
         }
         
-        /* Truncate Mode (Not used by default anymore, but kept for logic) */
         .mode-truncate .cell-content {
             white-space: nowrap; overflow: hidden; display: block; 
             text-overflow: ellipsis; line-height: inherit;
         }
         
-        /* Wrap Mode (Default now) */
         .mode-wrap .cell-content {
             white-space: normal; word-break: break-word; display: block;
             overflow: hidden; 
@@ -130,7 +114,6 @@
         .type-number { text-align: right; color: #1a73e8; font-variant-numeric: tabular-nums; }
         .type-blob { color: #d93025; font-family: monospace; font-size: 11px; }
 
-        /* Modal Styles (Search) */
         .modal-overlay { 
             position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; 
             background-color: rgba(0,0,0,0.3); display: flex; align-items: flex-start; 
@@ -173,8 +156,7 @@
                 <input type="range" min="30" max="150" x-model.number="rowHeight" @input="updateScroll">
                 <span x-text="`${rowHeight}px`"></span>
             </div>
-            
-            </div>
+        </div>
         
         <button class="btn-primary" 
                 x-show="totalRows > 0" 
@@ -209,24 +191,14 @@
         <div class="spacer" :style="`height: ${totalRows * rowHeight}px; width: 1px`"></div>
         
         <table id="grid" :style="`transform: translateY(${offsetY}px); width: ${getTableWidth()}px`">
-            <tbody :class="wrapText ? 'mode-wrap' : 'mode-truncate'">
-                <template x-for="(row, rIdx) in rows" :key="row[0]">
-                    <tr :style="`height: ${rowHeight}px`">
-                        <td class="col-index" x-text="row[0]" style="width: 60px"></td>
-                        
-                        <template x-for="(val, cIdx) in row.slice(1)">
-                            <td :class="getCellClass(val)" 
-                                :style="`width: ${colWidths[cIdx]}px`">
-                                
-                                <div class="cell-content" 
-                                     x-text="formatCell(val)"
-                                     :style="`line-height: ${wrapText ? '1.2' : rowHeight + 'px'}`">
-                                </div>
-                            </td>
-                        </template>
-                    </tr>
+            <colgroup>
+                <col style="width: 60px"> <template x-for="w in colWidths">
+                    <col :style="`width: ${w}px`">
                 </template>
-            </tbody>
+            </colgroup>
+
+            <tbody id="grid-body" :class="wrapText ? 'mode-wrap' : 'mode-truncate'">
+                </tbody>
         </table>
     </div>
 
@@ -333,13 +305,12 @@
             currentTable: '',
             columns: [],
             colWidths: [],
-            rows: [],
             totalRows: 0,
             offsetY: 0,
             
             // View Settings
             rowHeight: 30,
-            wrapText: true, // Changed from false to true
+            wrapText: true,
             
             // Search
             isSearchOpen: false,
@@ -361,9 +332,7 @@
                 }
             },
 
-            // --- New Helper for Syncing Header ---
             syncHeader(e) {
-                // When body scrolls horizontally, scroll the header to match
                 if (this.$refs.headerPane) {
                     this.$refs.headerPane.scrollLeft = e.target.scrollLeft;
                 }
@@ -398,7 +367,6 @@
                 try {
                     this.totalRows = inspector.load_table(this.currentTable);
                     this.columns = JSON.parse(inspector.get_columns());
-                    
                     this.colWidths = new Array(this.columns.length).fill(150);
                     
                     this.searchQuery = "";
@@ -407,7 +375,6 @@
                     if (this.$refs.viewport) {
                         this.$refs.viewport.scrollTop = 0;
                     }
-
                 } catch (err) {
                     this.statusText = "Error loading table: " + err;
                 }
@@ -415,12 +382,15 @@
 
             updateSlice(start, count) {
                 if (!inspector) return;
-                const json = inspector.get_rows_slice(start, count);
-                this.rows = JSON.parse(json);
-                this.offsetY = start * this.rowHeight;
+
+                try {
+                    inspector.render_rows("grid-body", start, count, this.rowHeight);
+                    this.offsetY = start * this.rowHeight;
+                } catch (e) {
+                    console.error("Render failed", e);
+                }
             },
 
-            // --- Resizing Logic ---
             startResize(e, idx) {
                 this.resizingCol = idx;
                 this.startX = e.clientX;
@@ -441,14 +411,13 @@
             getTableWidth() {
                 if (this.colWidths.length === 0) return '100%';
                 const sum = this.colWidths.reduce((a, b) => a + b, 0);
-                return sum + 60;
+                return sum + 60; // +60 for index col
             },
             
             updateScroll() {
                 this._forceUpdate = true;
             },
 
-            // --- Search & Utils ---
             openSearch() {
                 this.isSearchOpen = true;
                 this.$nextTick(() => this.$refs.searchInput.focus());
@@ -469,24 +438,12 @@
             },
 
             resetView() {
-                this.rows = [];
                 this.columns = [];
                 this.colWidths = [];
                 this.totalRows = 0;
                 this.currentTable = "";
-            },
-
-            getCellClass(val) {
-                if (val === null) return 'type-null';
-                if (typeof val === 'number') return 'type-number';
-                if (val === "<blob>") return 'type-blob';
-                return '';
-            },
-
-            formatCell(val) {
-                if (val === null) return 'NULL';
-                if (val === "<blob>") return 'BLOB';
-                return val;
+                const el = document.getElementById('grid-body');
+                if (el) el.innerHTML = "";
             }
         }));
 

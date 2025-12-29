@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::io::Write;
 use std::panic;
+use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 // Internal struct to hold processed table data in memory
@@ -235,52 +236,96 @@ impl Inspector {
         serde_json::to_string(&table_data.columns).map_err(|e| e.to_string())
     }
 
-    pub fn get_rows_slice(&self, start: usize, count: usize) -> Result<String, String> {
-        let table_data = self
-            .tables
-            .get(&self.current_table_name)
-            .ok_or_else(|| "No table loaded".to_string())?;
+    /// Renders rows directly into the DOM container specified by `container_id`.
+    /// This bypasses JSON serialization and is hopefully much faster/lighter.
+    pub fn render_rows(
+        &self,
+        container_id: &str,
+        start: usize,
+        count: usize,
+        row_height: f64,
+    ) -> Result<(), JsValue> {
+        let window = web_sys::window().ok_or("No global `window` exists")?;
+        let document = window
+            .document()
+            .ok_or("Should have a document on window")?;
+        let container = document
+            .get_element_by_id(container_id)
+            .ok_or_else(|| format!("Element with id '{}' not found", container_id))?;
+
+        // Clear existing rows efficiently
+        container.set_inner_html("");
+
+        let table_data = match self.tables.get(&self.current_table_name) {
+            Some(t) => t,
+            None => return Ok(()),
+        };
+
+        if start >= self.filtered_indices.len() {
+            return Ok(());
+        }
 
         let end = (start + count).min(self.filtered_indices.len());
-        if start >= self.filtered_indices.len() {
-            return Ok("[]".to_string());
-        }
-
         let slice_indices = &self.filtered_indices[start..end];
-        let mut json = String::from("[");
 
-        for (i, &original_index) in slice_indices.iter().enumerate() {
-            if i > 0 {
-                json.push(',');
-            }
+        // Create a fragment to batch DOM insertions (avoids multiple reflows)
+        let fragment = document.create_document_fragment();
 
-            json.push('[');
+        for &original_index in slice_indices {
+            let tr = document.create_element("tr")?;
 
-            // Add Row Index (1-based)
-            json.push_str(&(original_index + 1).to_string());
-            json.push(',');
+            // Set row height directly on the TR
+            let tr_html: &web_sys::HtmlElement = tr.unchecked_ref();
+            tr_html
+                .style()
+                .set_property("height", &format!("{}px", row_height))?;
 
+            // 1. Render Index Column
+            let td_index = document.create_element("td")?;
+            td_index.set_class_name("col-index");
+            td_index.set_text_content(Some(&(original_index + 1).to_string()));
+            tr.append_child(&td_index)?;
+
+            // 2. Render Data Columns
             let row = &table_data.rows[original_index];
+            for val in row {
+                let td = document.create_element("td")?;
+                let div = document.create_element("div")?;
+                div.set_class_name("cell-content");
 
-            for (j, val) in row.iter().enumerate() {
-                if j > 0 {
-                    json.push(',');
-                }
                 match val {
-                    Value::Null => json.push_str("null"),
-                    Value::Integer(v) => json.push_str(&v.to_string()),
-                    Value::Real(v) => json.push_str(&v.to_string()),
-                    Value::Text(v) => {
-                        let s = serde_json::to_string(v)
-                            .unwrap_or_else(|_| "\"<encoding error>\"".to_string());
-                        json.push_str(&s);
+                    Value::Null => {
+                        td.set_class_name("type-null");
+                        div.set_text_content(Some("NULL"));
                     }
-                    Value::Blob(_) => json.push_str("\"<blob>\""),
+                    Value::Integer(v) => {
+                        td.set_class_name("type-number");
+                        div.set_text_content(Some(&v.to_string()));
+                    }
+                    Value::Real(v) => {
+                        td.set_class_name("type-number");
+                        div.set_text_content(Some(&v.to_string()));
+                    }
+                    Value::Text(v) => {
+                        // Text does not get a specific class, just content
+                        div.set_text_content(Some(v));
+                    }
+                    Value::Blob(_) => {
+                        td.set_class_name("type-blob");
+                        div.set_text_content(Some("BLOB"));
+                    }
                 }
+
+                td.append_child(&div)?;
+                tr.append_child(&td)?;
             }
-            json.push(']');
+
+            fragment.append_child(&tr)?;
         }
-        json.push(']');
-        Ok(json)
+
+        // Single append to the DOM
+        container.append_child(&fragment)?;
+
+        Ok(())
     }
 }
