@@ -164,6 +164,14 @@
                 x-cloak>
             Find / Filter
         </button>
+
+        <button class="btn-primary" 
+                x-show="totalRows > 0" 
+                @click="exportTable" 
+                style="margin-left: 8px;"
+                x-cloak>
+            Export CSV
+        </button>
         
         <span id="status" x-text="statusText"></span>
     </div>
@@ -434,6 +442,29 @@
 
                 if (this.$refs.viewport) {
                     this.$refs.viewport.scrollTop = 0;
+                }
+            },
+
+            exportTable() {
+                if (!inspector || !this.currentTable) return;
+                
+                try {
+                    const csvContent = inspector.export_csv();
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", `${this.currentTable}.csv`);
+                    document.body.appendChild(link);
+                    
+                    link.click();
+                    
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                } catch (e) {
+                    alert("Export failed: " + e);
+                    console.error(e);
                 }
             },
 

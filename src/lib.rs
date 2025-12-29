@@ -3,6 +3,7 @@ extern crate alloc;
 mod blue_archive_generated;
 mod db_migrator;
 
+use csv::WriterBuilder;
 use regex::Regex;
 use sqlite_wasm_reader::{Database, SelectQuery, Value};
 use std::collections::HashMap;
@@ -234,6 +235,50 @@ impl Inspector {
             .ok_or_else(|| "No table loaded".to_string())?;
 
         serde_json::to_string(&table_data.columns).map_err(|e| e.to_string())
+    }
+
+    /// Exports the currently filtered table data as a CSV string
+    pub fn export_csv(&self) -> Result<String, String> {
+        let table_data = self
+            .tables
+            .get(&self.current_table_name)
+            .ok_or_else(|| "No table loaded".to_string())?;
+
+        // Use the csv crate writer. We write to a Vec<u8> first.
+        let mut wtr = WriterBuilder::new()
+            .has_headers(false) // We write headers manually to match table_data structure
+            .from_writer(Vec::new());
+
+        // 1. Write Headers
+        wtr.write_record(&table_data.columns)
+            .map_err(|e| format!("Failed to write headers: {}", e))?;
+
+        // 2. Write Rows (using filtered indices)
+        for &idx in &self.filtered_indices {
+            let row = &table_data.rows[idx];
+
+            // Convert the row values to a vector of strings for the CSV writer
+            let row_strings: Vec<String> = row
+                .iter()
+                .map(|val| match val {
+                    Value::Text(t) => t.clone(),
+                    Value::Integer(n) => n.to_string(),
+                    Value::Real(f) => f.to_string(),
+                    Value::Null => "".to_string(),
+                    Value::Blob(b) => format!("<Blob {} bytes>", b.len()),
+                })
+                .collect();
+
+            wtr.write_record(&row_strings)
+                .map_err(|e| format!("Failed to write row: {}", e))?;
+        }
+
+        // 3. Finish and convert to String
+        let data = wtr
+            .into_inner()
+            .map_err(|e| format!("Failed to flush CSV: {}", e))?;
+
+        String::from_utf8(data).map_err(|e| format!("Invalid UTF-8 in CSV output: {}", e))
     }
 
     /// Renders rows directly into the DOM container specified by `container_id`.
