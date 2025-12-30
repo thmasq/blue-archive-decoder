@@ -1,4 +1,4 @@
-use crate::blue_archive_generated::global::*;
+use crate::ba_flatbuffers::global::*;
 use sqlite_wasm_reader::{Database, SelectQuery, Value};
 use std::collections::HashMap;
 use std::io::Cursor;

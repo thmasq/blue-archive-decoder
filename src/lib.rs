@@ -1,6 +1,6 @@
 extern crate alloc;
 
-mod blue_archive_generated;
+mod ba_flatbuffers;
 mod db_migrator;
 
 use csv::WriterBuilder;
@@ -11,7 +11,7 @@ use std::io::Cursor;
 use std::io::Write;
 use std::panic;
 use wasm_bindgen::JsCast;
-use wasm_bindgen::prelude::*;
+use wasm_bindgen::prelude::{JsValue, wasm_bindgen};
 
 // Internal struct to hold processed table data in memory
 struct TableData {
