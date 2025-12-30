@@ -142,7 +142,7 @@ dependencies = [
  "csv",
  "flatbuffers",
  "leptos",
- "leptos_virtual_scroller",
+ "leptos-use",
  "paste",
  "regex",
  "serde",
@@ -1015,9 +1015,9 @@ dependencies = [
 
 [[package]]
 name = "leptos-use"
-version = "0.16.3"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce2162c453100c7d6bc0b6f188ef1df582e35c2458caf6cb69fcddc87619c0db"
+checksum = "3a59caa13dbc0f4d71bf3d610884953273c52a0bbe995b35d36cdb1c8f91142f"
 dependencies = [
  "cfg-if",
  "chrono",
@@ -1125,18 +1125,6 @@ dependencies = [
  "serde_json",
  "server_fn",
  "tachys",
-]
-
-[[package]]
-name = "leptos_virtual_scroller"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37c5528c07048474d12535e4cc085538a829d5e45306f9a8b42dc43f64c25402"
-dependencies = [
- "leptos",
- "leptos-use",
- "leptos_dom",
- "wasm-bindgen",
 ]
 
 [[package]]
