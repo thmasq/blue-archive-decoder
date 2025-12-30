@@ -25,9 +25,12 @@ pub fn App() -> impl IntoView {
         let input: HtmlInputElement = ev.target().unwrap().unchecked_into();
         if let Some(files) = input.files() {
             if let Some(file) = files.get(0) {
+                let filename = file.name();
+                web_sys::console::log_1(&format!("File selected: {}", filename).into());
                 set_is_loading.set(true);
 
                 spawn_local(async move {
+                    web_sys::console::log_1(&format!("Starting to read file: {}", filename).into());
                     let promise = file.array_buffer();
                     let future = wasm_bindgen_futures::JsFuture::from(promise);
 
@@ -36,16 +39,39 @@ pub fn App() -> impl IntoView {
                             let uint8_array = js_sys::Uint8Array::new(&array_buffer);
                             let vec = uint8_array.to_vec();
 
+                            web_sys::console::log_1(
+                                &format!(
+                                    "File read successfully. Size: {} bytes. Beginning parsing...",
+                                    vec.len()
+                                )
+                                .into(),
+                            );
+
                             match loader::load_tables(vec) {
                                 Ok(loaded) => {
+                                    web_sys::console::log_1(
+                                        &format!(
+                                            "Successfully parsed and loaded {} tables.",
+                                            loaded.len()
+                                        )
+                                        .into(),
+                                    );
                                     let rc_map: HashMap<_, _> =
                                         loaded.into_iter().map(|(k, v)| (k, Arc::new(v))).collect();
                                     set_tables.set(rc_map);
                                 }
-                                Err(e) => web_sys::console::error_1(&e.into()),
+                                Err(e) => {
+                                    web_sys::console::error_1(
+                                        &format!("Error parsing tables: {}", e).into(),
+                                    );
+                                    web_sys::console::error_1(&e.into());
+                                }
                             }
                         }
-                        Err(e) => web_sys::console::error_1(&e),
+                        Err(e) => {
+                            web_sys::console::error_1(&"Error reading file from input".into());
+                            web_sys::console::error_1(&e);
+                        }
                     }
                     set_is_loading.set(false);
                 });

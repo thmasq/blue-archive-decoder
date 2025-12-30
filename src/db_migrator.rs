@@ -159,7 +159,7 @@ pub fn register_loaders(registry: &mut HashMap<String, TableLoader>) {
     register_table!(registry, IdCardBackground);
     register_table!(registry, Information);
     register_table!(registry, LoadingImage);
-    register_table!(registry, LocalizeCharProfile);
+    // register_table!(registry, LocalizeCharProfileChange);
     register_table!(registry, Localize);
     register_table!(registry, LocalizeError);
     register_table!(registry, LocalizeEtc);
