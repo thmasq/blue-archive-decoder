@@ -85,9 +85,10 @@ macro_rules! register_table {
 
                         if let serde_json::Value::Object(map) = json_val {
                             if first {
-                                // Extract headers from the first row.
-                                // serde_json::Map is backed by BTreeMap, so keys are sorted alphabetically.
-                                headers = map.keys().cloned().collect();
+                                headers = map.keys()
+                                    .filter(|k| !k.ends_with("_th") && !k.ends_with("_tw") && *k != "tw" && *k != "th")
+                                    .cloned()
+                                    .collect();
                                 first = false;
                             }
 
