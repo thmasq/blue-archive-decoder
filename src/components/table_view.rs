@@ -1,4 +1,5 @@
 use crate::core::TableData;
+use crate::core::text_measurer::measure_text_height;
 use leptos::html::Div;
 use leptos::prelude::*;
 use leptos_use::use_resize_observer;
@@ -6,19 +7,6 @@ use regex::Regex;
 use sqlite_wasm_reader::Value;
 use std::hash::Hash;
 use std::sync::Arc;
-use wasm_bindgen::JsCast;
-
-#[derive(Clone)]
-struct SendWrapper<T>(T);
-unsafe impl<T> Send for SendWrapper<T> {}
-unsafe impl<T> Sync for SendWrapper<T> {}
-
-impl<T> std::ops::Deref for SendWrapper<T> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
 
 #[component]
 pub fn TableView(data: Arc<TableData>) -> impl IntoView {
@@ -29,22 +17,8 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     let data_for_height = data.clone();
     let data_for_resize = data.clone();
 
-    let canvas_ctx = {
-        let document = leptos::web_sys::window().unwrap().document().unwrap();
-        let canvas = document.create_element("canvas").unwrap();
-        let canvas: web_sys::HtmlCanvasElement = canvas.dyn_into().unwrap();
-        let ctx = canvas
-            .get_context("2d")
-            .unwrap()
-            .unwrap()
-            .dyn_into::<web_sys::CanvasRenderingContext2d>()
-            .unwrap();
-
-        SendWrapper(ctx)
-    };
-
     let (col_width, set_col_width) = signal(100.0);
-    let (computed_font, set_computed_font) = signal("16px sans-serif".to_string());
+    let (computed_font_size, set_computed_font_size) = signal(16.0f32);
     let header_ref = NodeRef::<Div>::new();
 
     use_resize_observer(header_ref, move |entries, _| {
@@ -59,13 +33,16 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
         if let Some(el) = header_ref.get() {
             let window = leptos::web_sys::window().unwrap();
             if let Ok(Some(style)) = window.get_computed_style(&el) {
-                let font_size = style
+                let font_size_str = style
                     .get_property_value("font-size")
                     .unwrap_or("16px".into());
-                let font_family = style
-                    .get_property_value("font-family")
-                    .unwrap_or("sans-serif".into());
-                set_computed_font.set(format!("{} {}", font_size, font_family));
+
+                let size = font_size_str
+                    .trim_end_matches("px")
+                    .parse::<f32>()
+                    .unwrap_or(16.0);
+
+                set_computed_font_size.set(size);
             }
         }
     });
@@ -95,23 +72,21 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
 
     let item_height_calc = move |_idx: usize, row_idx: &usize| -> usize {
         let row = &data_for_height.rows[*row_idx];
-        let current_col_width = col_width.get();
-        let current_font = computed_font.get();
+        let current_col_width = col_width.get() as f32;
+        let current_font_size = computed_font_size.get();
 
         let usable_width = current_col_width - 14.0;
-        let mut max_height = 30;
-
-        canvas_ctx.set_font(&current_font);
+        let mut max_height = 30.0;
 
         for val in row {
             if let Value::Text(text) = val {
-                let height = measure_text_height(&canvas_ctx, text, usable_width);
+                let height = measure_text_height(text, usable_width, current_font_size);
                 if height > max_height {
                     max_height = height;
                 }
             }
         }
-        max_height
+        max_height as usize
     };
 
     let grid_template = format!("50px {}", "minmax(100px, 1fr) ".repeat(data.columns.len()));
@@ -182,46 +157,6 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
             </div>
         </div>
     }
-}
-
-fn measure_text_height(
-    ctx: &web_sys::CanvasRenderingContext2d,
-    text: &str,
-    max_width: f64,
-) -> usize {
-    if text.is_empty() {
-        return 30;
-    }
-
-    let space_width = ctx.measure_text(" ").unwrap().width();
-
-    let paragraphs = text.split('\n');
-    let mut total_lines = 0;
-
-    for paragraph in paragraphs {
-        let words = paragraph.split_whitespace();
-        let mut current_line_width = 0.0;
-        let mut lines_in_paragraph = 1;
-
-        for word in words {
-            let word_width = ctx.measure_text(word).unwrap().width();
-
-            if current_line_width + word_width <= max_width {
-                current_line_width += word_width + space_width;
-            } else {
-                lines_in_paragraph += 1;
-                if word_width > max_width {
-                    lines_in_paragraph += (word_width / max_width).floor() as usize;
-                    current_line_width = word_width % max_width;
-                } else {
-                    current_line_width = word_width + space_width;
-                }
-            }
-        }
-        total_lines += lines_in_paragraph;
-    }
-
-    (total_lines * 20) + 14
 }
 
 fn row_matches(row: &[Value], re: &Regex) -> bool {

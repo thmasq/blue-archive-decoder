@@ -1,4 +1,5 @@
 pub mod loader;
+pub mod text_measurer;
 
 use sqlite_wasm_reader::Value;
 

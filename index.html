@@ -6,11 +6,38 @@
     <title>Blue Archive Decoder</title>
     
     <link data-trunk rel="rust" data-bin="blue-archive-decoder" />
+    <link data-trunk rel="copy-file" href="src/fonts/NotoSans-Regular.ttf" data-target-path="fonts" />
+    <link data-trunk rel="copy-file" href="src/fonts/NotoSansJP-Regular.ttf" data-target-path="fonts" />
+    <link data-trunk rel="copy-file" href="src/fonts/NotoSansKR-Regular.ttf" data-target-path="fonts" />
     
     <style>
-        html, body { height: 100%; margin: 0; padding: 0; font-family: sans-serif; }
+        @font-face {
+            font-family: 'Noto Sans';
+            src: url('/fonts/NotoSans-Regular.ttf');
+            font-weight: normal;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Noto Sans JP';
+            src: url('/fonts/NotoSansJP-Regular.ttf');
+            font-weight: normal;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Noto Sans KR';
+            src: url('/fonts/NotoSansKR-Regular.ttf');
+            font-weight: normal;
+            font-style: normal;
+        }
+
+        html, body { 
+            height: 100%; 
+            margin: 0; 
+            padding: 0; 
+            font-family: 'Noto Sans', 'Noto Sans JP', 'Noto Sans KR', sans-serif; 
+        }
     </style>
 </head>
 <body>
-    </body>
+</body>
 </html>
