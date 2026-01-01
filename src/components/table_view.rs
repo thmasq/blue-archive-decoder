@@ -177,7 +177,8 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
         let current_col_width = col_width.get() as f32;
         let current_font_size = computed_font_size.get();
 
-        let usable_width = current_col_width - 14.0;
+        let usable_width = (current_col_width - 10.0).max(10.0);
+
         let mut max_height = default_row_height as f32;
 
         for val in row {

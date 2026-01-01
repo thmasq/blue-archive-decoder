@@ -26,29 +26,43 @@ fn get_fonts() -> &'static FontSet {
 }
 
 pub fn measure_text_height(text: &str, max_width: f32, font_size: f32) -> f32 {
-    if text.is_empty() {
+    if text.is_empty() || max_width <= 0.5 {
         return 30.0;
     }
 
     let fonts = get_fonts();
 
     let line_height = font_size * 1.25;
-    let vertical_padding = 14.0;
+    let vertical_padding = 12.0;
 
-    let mut lines = 0;
+    let mut lines = 1;
     let mut current_line_width = 0.0;
-
     let mut last_offset = 0;
+
+    let text_len = text.len();
 
     for (offset, opportunity) in linebreaks(text) {
         let chunk = &text[last_offset..offset];
-
         let chunk_width = measure_chunk_width(chunk, fonts, font_size);
 
         if current_line_width + chunk_width > max_width {
             if current_line_width > 0.0 {
                 lines += 1;
-                current_line_width = chunk_width;
+            }
+
+            if chunk_width > max_width {
+                let chunk_lines = (chunk_width / max_width).ceil() as usize;
+
+                if chunk_lines > 0 {
+                    lines += chunk_lines - 1;
+                }
+
+                let remainder = chunk_width % max_width;
+                current_line_width = if remainder == 0.0 {
+                    max_width
+                } else {
+                    remainder
+                };
             } else {
                 current_line_width = chunk_width;
             }
@@ -57,8 +71,10 @@ pub fn measure_text_height(text: &str, max_width: f32, font_size: f32) -> f32 {
         }
 
         if let BreakOpportunity::Mandatory = opportunity {
-            lines += 1;
-            current_line_width = 0.0;
+            if offset < text_len {
+                lines += 1;
+                current_line_width = 0.0;
+            }
         }
 
         last_offset = offset;
