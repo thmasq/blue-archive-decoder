@@ -8,6 +8,92 @@ use sqlite_wasm_reader::Value;
 use std::hash::Hash;
 use std::sync::Arc;
 
+#[derive(Clone, Debug)]
+pub struct FenwickTree {
+    tree: Vec<i64>,
+    size: usize,
+}
+
+impl FenwickTree {
+    pub fn new(size: usize, default_value: i64) -> Self {
+        let mut tree = vec![0i64; size + 1];
+        for i in 1..=size {
+            tree[i] += default_value;
+            let parent = i + (i & (!i + 1));
+            if parent <= size {
+                tree[parent] += tree[i];
+            }
+        }
+        Self { tree, size }
+    }
+
+    pub fn update(&mut self, index: usize, delta: i64) {
+        if index >= self.size {
+            return;
+        }
+        let mut i = index + 1;
+        while i <= self.size {
+            self.tree[i] += delta;
+            i += i & (!i + 1);
+        }
+    }
+
+    pub fn prefix_sum(&self, index: usize) -> i64 {
+        let mut i = (index + 1).min(self.size);
+        let mut sum = 0;
+        while i > 0 {
+            sum += self.tree[i];
+            i -= i & (!i + 1);
+        }
+        sum
+    }
+
+    pub fn get(&self, index: usize) -> i64 {
+        if index >= self.size {
+            return 0;
+        }
+        let current = self.prefix_sum(index);
+        let prev = if index == 0 {
+            0
+        } else {
+            self.prefix_sum(index - 1)
+        };
+        current - prev
+    }
+
+    pub fn total_sum(&self) -> i64 {
+        if self.size == 0 {
+            0
+        } else {
+            self.prefix_sum(self.size - 1)
+        }
+    }
+
+    pub fn lower_bound(&self, value: i64) -> usize {
+        if self.size == 0 {
+            return 0;
+        }
+        let mut idx = 0;
+        let mut current_sum = 0;
+        let mut bit_mask = 1;
+        while (bit_mask << 1) <= self.size {
+            bit_mask <<= 1;
+        }
+
+        while bit_mask > 0 {
+            let t_idx = idx + bit_mask;
+            if t_idx <= self.size {
+                if current_sum + self.tree[t_idx] <= value {
+                    idx = t_idx;
+                    current_sum += self.tree[t_idx];
+                }
+            }
+            bit_mask >>= 1;
+        }
+        idx
+    }
+}
+
 #[component]
 pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     let (filter_query, set_filter_query) = signal(String::new());
@@ -17,16 +103,27 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     let data_for_height = data.clone();
     let data_for_resize = data.clone();
 
+    let default_row_height = 30;
+
     let (col_width, set_col_width) = signal(100.0);
     let (computed_font_size, set_computed_font_size) = signal(16.0f32);
     let header_ref = NodeRef::<Div>::new();
 
+    let (resize_trigger, set_resize_trigger) = signal(0);
+
     use_resize_observer(header_ref, move |entries, _| {
-        let rect = entries[0].content_rect();
-        let total_width = rect.width();
-        let cols = data_for_resize.columns.len().max(1);
-        let width_per_col = (total_width - 50.0) / cols as f64;
-        set_col_width.set(width_per_col.max(20.0));
+        if let Some(entry) = entries.first() {
+            let rect = entry.content_rect();
+            let total_width = rect.width();
+            let cols = data_for_resize.columns.len().max(1);
+            let width_per_col = (total_width - 50.0) / cols as f64;
+            let new_width = width_per_col.max(20.0);
+
+            if (new_width - col_width.get_untracked()).abs() > 0.5 {
+                set_col_width.set(new_width);
+                set_resize_trigger.update(|n| *n += 1);
+            }
+        }
     });
 
     Effect::new(move |_| {
@@ -36,13 +133,15 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                 let font_size_str = style
                     .get_property_value("font-size")
                     .unwrap_or("16px".into());
-
                 let size = font_size_str
                     .trim_end_matches("px")
                     .parse::<f32>()
                     .unwrap_or(16.0);
 
-                set_computed_font_size.set(size);
+                if (size - computed_font_size.get_untracked()).abs() > 0.1 {
+                    set_computed_font_size.set(size);
+                    set_resize_trigger.update(|n| *n += 1);
+                }
             }
         }
     });
@@ -71,12 +170,15 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     });
 
     let item_height_calc = move |_idx: usize, row_idx: &usize| -> usize {
+        if *row_idx >= data_for_height.rows.len() {
+            return default_row_height;
+        }
         let row = &data_for_height.rows[*row_idx];
         let current_col_width = col_width.get() as f32;
         let current_font_size = computed_font_size.get();
 
         let usable_width = current_col_width - 14.0;
-        let mut max_height = 30.0;
+        let mut max_height = default_row_height as f32;
 
         for val in row {
             if let Value::Text(text) = val {
@@ -93,7 +195,6 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
 
     view! {
         <div style="display: flex; flex-direction: column; height: 100%;">
-            // Toolbar
             <div style="padding: 10px; border-bottom: 1px solid #ccc; background: #fff;">
                 <strong>{data.name.clone()}</strong>
                 <span style="margin: 0 10px; color: #666;">
@@ -125,10 +226,13 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                     each=filtered_rows
                     key=move |(_, idx)| *idx
                     item_height=item_height_calc
-                    header=()
+                    default_item_height=default_row_height
+                    reset_trigger=resize_trigger
                     children=move |(_, row_idx)| {
+                        if *row_idx >= data_for_scroller.rows.len() {
+                            return view! { <div>"Error"</div> }.into_any();
+                        }
                         let row: &Vec<Value> = &data_for_scroller.rows[*row_idx];
-
                         view! {
                             <div style=format!("display: grid; grid-template-columns: {}; border-bottom: 1px solid #eee; height: 100%; align-items: start;", grid_template)>
                                 <div style="padding: 6px 4px; color: #888; border-right: 1px solid #eee; font-size: 0.8em; height: 100%; display: flex; align-items: center;">
@@ -151,7 +255,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                                     }
                                 }).collect::<Vec<_>>()}
                             </div>
-                        }
+                        }.into_any()
                     }
                 />
             </div>
@@ -175,179 +279,166 @@ fn row_matches(row: &[Value], re: &Regex) -> bool {
 }
 
 #[component]
-pub fn VirtualScroller<T, S, K, KN, C, N, H, IH>(
+pub fn VirtualScroller<T, S, K, KN, C, N, IH>(
     #[prop()] each: S,
     #[prop()] key: KN,
     #[prop()] children: C,
-    #[prop(optional)] header: Option<H>,
-    #[prop(optional)] header_height: usize,
     #[prop()] item_height: IH,
+    #[prop()] default_item_height: usize,
+    #[prop(optional)] reset_trigger: Option<ReadSignal<usize>>,
     #[prop(default = "")] inner_el_style: &'static str,
     #[prop(optional)] node_ref: Option<NodeRef<Div>>,
 ) -> impl IntoView
 where
     C: Fn((usize, &T)) -> N + 'static + Clone + Send + Sync,
-    KN: (Fn((usize, &T)) -> K) + 'static + Clone + Send + Sync,
+    KN: Fn((usize, &T)) -> K + 'static + Clone + Send + Sync,
     K: Eq + Hash + 'static,
     N: IntoView + 'static,
     S: With<Value = Vec<T>> + Copy + 'static + Send + Sync,
-    H: IntoView,
     IH: Fn(usize, &T) -> usize + 'static + Clone + Send + Sync,
 {
-    let items_len_sig = RwSignal::new(0usize);
-
-    let offsets = Memo::new(move |_| {
-        each.with(|items| {
-            items_len_sig.set(items.len());
-
-            let mut mapping = Vec::with_capacity(items.len() + 1);
-            let mut acc = header_height;
-            mapping.push(acc);
-
-            for (i, item) in items.iter().enumerate() {
-                acc += item_height(i, item);
-                mapping.push(acc);
-            }
-            mapping
-        })
-    });
-
-    let inner_height =
-        Memo::new(move |_| offsets.with(|offs| *offs.last().unwrap_or(&header_height)));
-
-    let window_height = RwSignal::new(0);
-    let scroll_top = RwSignal::new(0);
-
-    let anchor_index = RwSignal::new(0usize);
-    let prev_items_count = RwSignal::new(0usize);
-
-    let container = if let Some(node_ref) = node_ref {
-        node_ref
-    } else {
-        NodeRef::new()
-    };
+    let tree = RwSignal::new(FenwickTree::new(0, default_item_height as i64));
+    let measured_flags = RwSignal::new(Vec::<bool>::new());
 
     Effect::new(move |_| {
-        let offs = offsets.get();
-        let count = offs.len();
-        let old_count = prev_items_count.get_untracked();
-
-        if count == old_count && count > 1 {
-            let idx = anchor_index.get_untracked().min(count - 2);
-            if let Some(new_px) = offs.get(idx).copied() {
-                if let Some(el) = container.get_untracked() {
-                    el.set_scroll_top(new_px as i32);
-                    scroll_top.set(new_px);
-                }
-            }
+        if let Some(trigger) = reset_trigger {
+            trigger.get();
         }
 
-        prev_items_count.set(count);
+        each.with(|items| {
+            let len = items.len();
+            batch(move || {
+                tree.set(FenwickTree::new(len, default_item_height as i64));
+                measured_flags.set(vec![false; len]);
+            });
+        });
+    });
+
+    let inner_height = Memo::new(move |_| tree.with(|t| t.total_sum()));
+
+    let window_height = RwSignal::new(0usize);
+    let scroll_top = RwSignal::new(0usize);
+
+    let container = node_ref.unwrap_or_else(NodeRef::new);
+
+    use_resize_observer(container, move |entries, _| {
+        if let Some(entry) = entries.first() {
+            window_height.set(entry.content_rect().height() as usize);
+        }
     });
 
     let index_bounds = Memo::new(move |_| {
-        let scroll_top = scroll_top.get();
-        let window_height = window_height.get();
-        let scroll_bottom = scroll_top + window_height;
+        let st = scroll_top.get() as i64;
+        let wh = window_height.get() as i64;
+        let sb = st + wh;
 
-        offsets.with(|offs| {
-            if offs.len() <= 1 {
+        tree.with(|t| {
+            if t.size == 0 {
                 return (0, 0);
             }
 
-            let start_index = match offs.binary_search(&scroll_top) {
-                Ok(i) => i,
-                Err(i) => i.saturating_sub(1),
-            };
+            let start = t.lower_bound(st);
+            let end = t.lower_bound(sb);
 
-            let end_index = match offs.binary_search(&scroll_bottom) {
-                Ok(i) => i,
-                Err(i) => i,
-            };
-
-            (start_index, end_index.min(offs.len() - 1))
+            (
+                start.min(t.size.saturating_sub(1)),
+                end.min(t.size.saturating_sub(1)),
+            )
         })
     });
 
     let buffer_bounds = Memo::new(move |_| {
-        let items_len = items_len_sig.get();
-        let (start_index, end_index) = index_bounds.get();
-        let buffer_start = if start_index >= 2 { start_index - 2 } else { 0 };
-        let buffer_end = (end_index + 2).min(items_len);
+        let items_len = each.with(|i| i.len());
+        let (start, end) = index_bounds.get();
+
+        let buffer_start = start.saturating_sub(2);
+        let buffer_end = (end + 2).min(items_len);
+
         (buffer_start, buffer_end)
     });
 
-    use_resize_observer(container, move |a, _b| {
-        let rect = a[0].content_rect();
-        window_height.set(rect.height() as usize)
-    });
+    // Lazy measurement
+    Effect::new(move |_| {
+        let (start, end) = buffer_bounds.get();
+        let mut updates = Vec::new();
 
-    let force_refresh = RwSignal::new(false);
-    Effect::new(move || {
-        each.with(|_| {});
-        force_refresh.update(|v| {
-            *v = !*v;
+        each.with(|items| {
+            measured_flags.with_untracked(|flags| {
+                for i in start..end {
+                    if i < items.len() && i < flags.len() && !flags[i] {
+                        let real_height = item_height(i, &items[i]) as i64;
+                        updates.push((i, real_height));
+                    }
+                }
+            });
         });
+
+        if !updates.is_empty() {
+            batch(move || {
+                tree.update(|t| {
+                    for (idx, new_h) in &updates {
+                        let diff = new_h - t.get(*idx);
+                        if diff != 0 {
+                            t.update(*idx, diff);
+                        }
+                    }
+                });
+
+                measured_flags.update(|flags| {
+                    for (idx, _) in &updates {
+                        if *idx < flags.len() {
+                            flags[*idx] = true;
+                        }
+                    }
+                });
+            });
+        }
     });
 
     view! {
         <div
             node_ref=container
-            style="width: 100%; height: 100%; overflow-y: scroll;"
+            style="width: 100%; height: 100%; overflow-y: scroll; will-change: transform;"
             on:scroll=move |ev| {
                 let target: leptos::web_sys::HtmlElement = event_target(&ev);
-                let st = target.scroll_top() as usize;
-
-                scroll_top.set(st);
-
-                if let Some(offs) = offsets.try_get_untracked() {
-                    if !offs.is_empty() {
-                         let idx = match offs.binary_search(&st) {
-                            Ok(i) => i,
-                            Err(i) => i.saturating_sub(1),
-                        };
-                        anchor_index.set(idx);
-                    }
-                }
+                scroll_top.set(target.scroll_top() as usize);
             }
         >
             <div
-                id="scroller"
                 style="position: relative;"
                 style:height=move || format!("{}px", inner_height.get())
             >
-                {header}
                 {move || {
                     let children = children.clone();
-                    let key = key.clone();
-                    force_refresh.get();
+                    let key_fn = key.clone();
+                    let (start, end) = buffer_bounds.get();
 
                     view! {
                         <For
-                            each=move || buffer_bounds.get().0..buffer_bounds.get().1
+                            each=move || start..end
                             key=move |i| {
-                                each.with(|item| key((*i, item.get(*i).unwrap())))
+                                each.with(|items| {
+                                    items
+                                        .get(*i)
+                                        .map(|item| key_fn((*i, item)))
+                                })
                             }
                             children=move |i| {
-                                each.with(|item| {
-                                    let item_ref = item.get(i).unwrap();
-                                    let (buffer_start, buffer_end) = buffer_bounds.get();
+                                each.with(|items| {
+                                    if let Some(item) = items.get(i) {
+                                        let top = tree.with(|t| if i == 0 { 0 } else { t.prefix_sum(i - 1) });
+                                        let height = tree.with(|t| t.get(i));
 
-                                    if i >= buffer_start && i <= buffer_end {
                                         view! {
                                             <div
-                                                style=move || {
-                                                    let top = offsets.with(|offs| offs.get(i).copied().unwrap_or(0));
-                                                    let bottom = offsets.with(|offs| offs.get(i+1).copied().unwrap_or(top + 30));
-                                                    format!(
-                                                        "position: absolute; width: 100%; top: {}px; height: {}px; {}",
-                                                        top,
-                                                        bottom - top,
-                                                        inner_el_style,
-                                                    )
-                                                }
+                                                style=format!(
+                                                    "position: absolute; width: 100%; top: {}px; height: {}px; {}",
+                                                    top,
+                                                    height,
+                                                    inner_el_style,
+                                                )
                                             >
-                                                {children((i, item_ref))}
+                                                {children((i, item))}
                                             </div>
                                         }.into_any()
                                     } else {
