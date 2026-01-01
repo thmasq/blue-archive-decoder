@@ -300,6 +300,10 @@ where
     let tree = RwSignal::new(FenwickTree::new(0, default_item_height as i64));
     let measured_flags = RwSignal::new(Vec::<bool>::new());
 
+    let window_height = RwSignal::new(0usize);
+    let scroll_top = RwSignal::new(0usize);
+    let container = node_ref.unwrap_or_else(NodeRef::new);
+
     Effect::new(move |_| {
         if let Some(trigger) = reset_trigger {
             trigger.get();
@@ -310,16 +314,17 @@ where
             batch(move || {
                 tree.set(FenwickTree::new(len, default_item_height as i64));
                 measured_flags.set(vec![false; len]);
+
+                scroll_top.set(0);
+
+                if let Some(el) = container.get() {
+                    el.set_scroll_top(0);
+                }
             });
         });
     });
 
     let inner_height = Memo::new(move |_| tree.with(|t| t.total_sum()));
-
-    let window_height = RwSignal::new(0usize);
-    let scroll_top = RwSignal::new(0usize);
-
-    let container = node_ref.unwrap_or_else(NodeRef::new);
 
     use_resize_observer(container, move |entries, _| {
         if let Some(entry) = entries.first() {
