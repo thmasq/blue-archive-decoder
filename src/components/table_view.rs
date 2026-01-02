@@ -1,6 +1,8 @@
 use crate::core::TableData;
 use crate::core::text_measurer::measure_text_height;
+use leptos::ev;
 use leptos::html::Div;
+use leptos::prelude::window;
 use leptos::prelude::*;
 use leptos_use::{use_event_listener, use_resize_observer};
 use regex::Regex;
@@ -8,6 +10,8 @@ use sqlite_wasm_reader::Value;
 use std::hash::Hash;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
+
+const MIN_COL_WIDTH: f64 = 100.0;
 
 #[derive(Clone, Debug)]
 pub struct FenwickTree {
@@ -95,6 +99,13 @@ impl FenwickTree {
     }
 }
 
+#[derive(Clone, Copy)]
+struct ResizeState {
+    col_idx: usize,
+    start_x: f64,
+    start_width: f64,
+}
+
 #[component]
 pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     let (filter_query, set_filter_query) = signal(String::new());
@@ -102,16 +113,69 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     let data_for_filter = data.clone();
     let data_for_scroller = data.clone();
     let data_for_height = data.clone();
-    let data_for_resize = data.clone();
+
+    let initial_col_count = data.columns.len().max(1);
+
+    let (display_widths, set_display_widths) = signal(vec![MIN_COL_WIDTH; initial_col_count]);
+    let (measured_widths, set_measured_widths) = signal(vec![MIN_COL_WIDTH; initial_col_count]);
+    let (manual_resize_triggered, set_manual_resize_triggered) = signal(false);
 
     let default_row_height = 30;
-
-    let (col_width, set_col_width) = signal(100.0);
     let (computed_font_size, set_computed_font_size) = signal(16.0f32);
     let header_ref = NodeRef::<Div>::new();
     let scroll_view_ref = NodeRef::<Div>::new();
-
     let (scrollbar_width, set_scrollbar_width) = signal(12.0);
+
+    let (resizing, set_resizing) = signal::<Option<ResizeState>>(None);
+    let (resize_trigger, set_resize_trigger) = signal(0); // Forces VirtualScroller update
+
+    let _ = use_event_listener(window(), ev::mousemove, move |ev| {
+        if let Some(state) = resizing.get() {
+            let current_x = ev.client_x() as f64;
+            let delta = current_x - state.start_x;
+            let new_width = (state.start_width + delta).max(MIN_COL_WIDTH);
+
+            set_display_widths.update(|widths| {
+                if state.col_idx < widths.len() {
+                    widths[state.col_idx] = new_width;
+                }
+            });
+        }
+    });
+
+    let _ = use_event_listener(window(), ev::mouseup, move |_| {
+        if resizing.get().is_some() {
+            set_resizing.set(None);
+            set_manual_resize_triggered.set(true);
+
+            let current_display = display_widths.get();
+            set_measured_widths.set(current_display);
+
+            set_resize_trigger.update(|n| *n += 1);
+        }
+    });
+
+    use_resize_observer(header_ref, move |entries, _| {
+        if let Some(entry) = entries.first() {
+            if !manual_resize_triggered.get_untracked() {
+                let rect = entry.content_rect();
+                let total_width = rect.width();
+                let cols = initial_col_count;
+                let width_per_col = (total_width - 50.0) / cols as f64;
+                let new_width = width_per_col.max(MIN_COL_WIDTH);
+
+                set_display_widths.update(|widths| {
+                    let current_avg = widths.iter().sum::<f64>() / widths.len() as f64;
+                    if (current_avg - new_width).abs() > 0.5 {
+                        *widths = vec![new_width; cols];
+
+                        set_measured_widths.set(widths.clone());
+                        set_resize_trigger.update(|n| *n += 1);
+                    }
+                });
+            }
+        }
+    });
 
     Effect::new(move |_| {
         let window = leptos::web_sys::window().unwrap();
@@ -131,23 +195,6 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
 
         div.remove();
         set_scrollbar_width.set(width as f64);
-    });
-
-    let (resize_trigger, set_resize_trigger) = signal(0);
-
-    use_resize_observer(header_ref, move |entries, _| {
-        if let Some(entry) = entries.first() {
-            let rect = entry.content_rect();
-            let total_width = rect.width();
-            let cols = data_for_resize.columns.len().max(1);
-            let width_per_col = (total_width - 50.0) / cols as f64;
-            let new_width = width_per_col.max(100.0);
-
-            if (new_width - col_width.get_untracked()).abs() > 0.5 {
-                set_col_width.set(new_width);
-                set_resize_trigger.update(|n| *n += 1);
-            }
-        }
     });
 
     let _ = use_event_listener(scroll_view_ref, leptos::ev::scroll, move |ev| {
@@ -205,15 +252,21 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
             return default_row_height;
         }
         let row = &data_for_height.rows[*row_idx];
-        let current_col_width = col_width.get() as f32;
-        let current_font_size = computed_font_size.get();
 
-        let usable_width = (current_col_width - 10.0).max(10.0);
+        let widths = measured_widths.get();
+        let current_font_size = computed_font_size.get();
 
         let mut max_height = default_row_height as f32;
 
-        for val in row {
+        for (col_idx, val) in row.iter().enumerate() {
             if let Value::Text(text) = val {
+                let col_w = if col_idx < widths.len() {
+                    widths[col_idx]
+                } else {
+                    MIN_COL_WIDTH
+                };
+                let usable_width = (col_w as f32 - 10.0).max(10.0);
+
                 let height = measure_text_height(text, usable_width, current_font_size);
                 if height > max_height {
                     max_height = height;
@@ -223,8 +276,15 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
         max_height as usize
     };
 
-    let grid_template = format!("50px {}", "minmax(100px, 1fr) ".repeat(data.columns.len()));
-    let grid_template_header = grid_template.clone();
+    let grid_template = move || {
+        let widths = display_widths.get();
+        let cols_str = widths
+            .iter()
+            .map(|w| format!("{}px", w))
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!("50px {}", cols_str)
+    };
 
     view! {
         <div style="display: flex; flex-direction: column; height: 100%;">
@@ -244,14 +304,42 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
 
             <div
                 node_ref=header_ref
-                style=move || format!("display: grid; grid-template-columns: {}; background: #eee; font-weight: bold; border-bottom: 1px solid #999; padding-right: {}px; overflow-x: hidden;", grid_template_header, scrollbar_width.get())
+                style=move || format!("display: grid; grid-template-columns: {}; background: #eee; font-weight: bold; border-bottom: 1px solid #999; padding-right: {}px; overflow-x: hidden;", grid_template(), scrollbar_width.get())
             >
                 <div style="padding: 4px; border-right: 1px solid #ccc;">"#"</div>
-                {data.columns.iter().map(|col| view! {
-                    <div style="padding: 4px; border-right: 1px solid #ccc; overflow: hidden; text-overflow: ellipsis;">
-                        {col.clone()}
-                    </div>
-                }).collect::<Vec<_>>()}
+                {
+                    data.columns.iter().enumerate().map(|(i, col)| view! {
+                        <div style="position: relative; padding: 4px; border-right: 1px solid #ccc; overflow: hidden; display: flex; align-items: center;">
+                            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%;">
+                                {col.clone()}
+                            </span>
+                            // Resizer Handle
+                            <div
+                                style="position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: col-resize; z-index: 10;"
+                                on:mousedown=move |ev| {
+                                    let start_x = ev.client_x() as f64;
+                                    let current_width = display_widths.with(|w| w.get(i).copied().unwrap_or(MIN_COL_WIDTH));
+                                    set_resizing.set(Some(ResizeState {
+                                        col_idx: i,
+                                        start_x,
+                                        start_width: current_width,
+                                    }));
+                                    // Prevent text selection during drag
+                                    ev.prevent_default();
+                                }
+                                // Optional: visual hover effect for handle
+                                on:mouseover=move |ev: ev::MouseEvent| {
+                                    let target: leptos::web_sys::HtmlElement = event_target(&ev);
+                                    let _ = target.style().set_property("background-color", "#ccc");
+                                }
+                                on:mouseout=move |ev: ev::MouseEvent| {
+                                    let target: leptos::web_sys::HtmlElement = event_target(&ev);
+                                    let _ = target.style().remove_property("background-color");
+                                }
+                            ></div>
+                        </div>
+                    }).collect::<Vec<_>>()
+                }
             </div>
 
             <div style="flex: 1; overflow-y: hidden;">
@@ -267,8 +355,9 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                             return view! { <div>"Error"</div> }.into_any();
                         }
                         let row: &Vec<Value> = &data_for_scroller.rows[*row_idx];
+
                         view! {
-                            <div style=format!("display: grid; grid-template-columns: {}; border-bottom: 1px solid #eee; height: 100%; align-items: start;", grid_template)>
+                            <div style=move || format!("display: grid; grid-template-columns: {}; border-bottom: 1px solid #eee; height: 100%; align-items: start;", grid_template())>
                                 <div style="padding: 6px 4px; color: #888; border-right: 1px solid #eee; font-size: 0.8em; height: 100%; display: flex; align-items: center;">
                                     {(*row_idx + 1).to_string()}
                                 </div>
@@ -396,7 +485,6 @@ where
         (buffer_start, buffer_end)
     });
 
-    // Lazy measurement
     Effect::new(move |_| {
         let (start, end) = buffer_bounds.get();
         let mut updates = Vec::new();
