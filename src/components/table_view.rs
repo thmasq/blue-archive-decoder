@@ -7,6 +7,7 @@ use regex::Regex;
 use sqlite_wasm_reader::Value;
 use std::hash::Hash;
 use std::sync::Arc;
+use wasm_bindgen::JsCast;
 
 #[derive(Clone, Debug)]
 pub struct FenwickTree {
@@ -109,6 +110,28 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     let (computed_font_size, set_computed_font_size) = signal(16.0f32);
     let header_ref = NodeRef::<Div>::new();
 
+    let (scrollbar_width, set_scrollbar_width) = signal(12.0);
+
+    Effect::new(move |_| {
+        let window = leptos::web_sys::window().unwrap();
+        let document = window.document().unwrap();
+        let body = document.body().unwrap();
+
+        let div = document.create_element("div").unwrap();
+        div.set_attribute(
+            "style",
+            "width: 100px; height: 100px; overflow: scroll; position: absolute; top: -9999px;",
+        )
+        .unwrap();
+        body.append_child(&div).unwrap();
+
+        let div_html = div.dyn_ref::<leptos::web_sys::HtmlElement>().unwrap();
+        let width = div_html.offset_width() - div.client_width();
+
+        div.remove();
+        set_scrollbar_width.set(width as f64);
+    });
+
     let (resize_trigger, set_resize_trigger) = signal(0);
 
     use_resize_observer(header_ref, move |entries, _| {
@@ -193,6 +216,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     };
 
     let grid_template = format!("50px {}", "minmax(100px, 1fr) ".repeat(data.columns.len()));
+    let grid_template_header = grid_template.clone();
 
     view! {
         <div style="display: flex; flex-direction: column; height: 100%;">
@@ -212,7 +236,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
 
             <div
                 node_ref=header_ref
-                style=format!("display: grid; grid-template-columns: {}; background: #eee; font-weight: bold; border-bottom: 1px solid #999; padding-right: 12px;", grid_template)
+                style=move || format!("display: grid; grid-template-columns: {}; background: #eee; font-weight: bold; border-bottom: 1px solid #999; padding-right: {}px;", grid_template_header, scrollbar_width.get())
             >
                 <div style="padding: 4px; border-right: 1px solid #ccc;">"#"</div>
                 {data.columns.iter().map(|col| view! {
