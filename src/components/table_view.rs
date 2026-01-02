@@ -2,7 +2,7 @@ use crate::core::TableData;
 use crate::core::text_measurer::measure_text_height;
 use leptos::html::Div;
 use leptos::prelude::*;
-use leptos_use::use_resize_observer;
+use leptos_use::{use_event_listener, use_resize_observer};
 use regex::Regex;
 use sqlite_wasm_reader::Value;
 use std::hash::Hash;
@@ -109,6 +109,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     let (col_width, set_col_width) = signal(100.0);
     let (computed_font_size, set_computed_font_size) = signal(16.0f32);
     let header_ref = NodeRef::<Div>::new();
+    let scroll_view_ref = NodeRef::<Div>::new();
 
     let (scrollbar_width, set_scrollbar_width) = signal(12.0);
 
@@ -146,6 +147,13 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                 set_col_width.set(new_width);
                 set_resize_trigger.update(|n| *n += 1);
             }
+        }
+    });
+
+    let _ = use_event_listener(scroll_view_ref, leptos::ev::scroll, move |ev| {
+        if let Some(header) = header_ref.get() {
+            let target: leptos::web_sys::HtmlElement = event_target(&ev);
+            header.set_scroll_left(target.scroll_left());
         }
     });
 
@@ -236,7 +244,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
 
             <div
                 node_ref=header_ref
-                style=move || format!("display: grid; grid-template-columns: {}; background: #eee; font-weight: bold; border-bottom: 1px solid #999; padding-right: {}px;", grid_template_header, scrollbar_width.get())
+                style=move || format!("display: grid; grid-template-columns: {}; background: #eee; font-weight: bold; border-bottom: 1px solid #999; padding-right: {}px; overflow-x: hidden;", grid_template_header, scrollbar_width.get())
             >
                 <div style="padding: 4px; border-right: 1px solid #ccc;">"#"</div>
                 {data.columns.iter().map(|col| view! {
@@ -246,13 +254,14 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                 }).collect::<Vec<_>>()}
             </div>
 
-            <div style="flex: 1; overflow-y: auto;">
+            <div style="flex: 1; overflow-y: hidden;">
                 <VirtualScroller
                     each=filtered_rows
                     key=move |(_, idx)| *idx
                     item_height=item_height_calc
                     default_item_height=default_row_height
                     reset_trigger=resize_trigger
+                    node_ref=scroll_view_ref
                     children=move |(_, row_idx)| {
                         if *row_idx >= data_for_scroller.rows.len() {
                             return view! { <div>"Error"</div> }.into_any();
@@ -428,7 +437,7 @@ where
     view! {
         <div
             node_ref=container
-            style="width: 100%; height: 100%; overflow-y: scroll; will-change: transform;"
+            style="width: 100%; height: 100%; overflow-y: scroll; overflow-x: auto; will-change: transform;"
             on:scroll=move |ev| {
                 let target: leptos::web_sys::HtmlElement = event_target(&ev);
                 scroll_top.set(target.scroll_top() as usize);
