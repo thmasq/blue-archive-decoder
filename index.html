@@ -5,27 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Blue Archive Decoder</title>
     
-    <link data-trunk rel="rust" data-bin="blue-archive-decoder" />
-    <link data-trunk rel="copy-file" href="src/fonts/NotoSans-Regular.ttf" data-target-path="fonts" />
-    <link data-trunk rel="copy-file" href="src/fonts/NotoSansJP-Regular.ttf" data-target-path="fonts" />
-    <link data-trunk rel="copy-file" href="src/fonts/NotoSansKR-Regular.ttf" data-target-path="fonts" />
-    
     <style>
         @font-face {
             font-family: 'Noto Sans';
-            src: url('/fonts/NotoSans-Regular.ttf');
+            src: url('fonts/NotoSans-Regular.ttf');
             font-weight: normal;
             font-style: normal;
         }
         @font-face {
             font-family: 'Noto Sans JP';
-            src: url('/fonts/NotoSansJP-Regular.ttf');
+            src: url('fonts/NotoSansJP-Regular.ttf');
             font-weight: normal;
             font-style: normal;
         }
         @font-face {
             font-family: 'Noto Sans KR';
-            src: url('/fonts/NotoSansKR-Regular.ttf');
+            src: url('fonts/NotoSansKR-Regular.ttf');
             font-weight: normal;
             font-style: normal;
         }
@@ -39,5 +34,14 @@
     </style>
 </head>
 <body>
+    <script type="module">
+        import init from './pkg/blue_archive_decoder.js';
+
+        async function run() {
+            await init();
+        }
+
+        run();
+    </script>
 </body>
 </html>

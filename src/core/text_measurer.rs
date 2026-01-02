@@ -2,9 +2,9 @@ use fontdue::{Font, FontSettings};
 use std::sync::OnceLock;
 use unicode_linebreak::{BreakOpportunity, linebreaks};
 
-const FONT_EN_BYTES: &[u8] = include_bytes!("../fonts/NotoSans-Regular.ttf");
-const FONT_JP_BYTES: &[u8] = include_bytes!("../fonts/NotoSansJP-Regular.ttf");
-const FONT_KR_BYTES: &[u8] = include_bytes!("../fonts/NotoSansKR-Regular.ttf");
+const FONT_EN_BYTES: &[u8] = include_bytes!("../../fonts/NotoSans-Regular.ttf");
+const FONT_JP_BYTES: &[u8] = include_bytes!("../../fonts/NotoSansJP-Regular.ttf");
+const FONT_KR_BYTES: &[u8] = include_bytes!("../../fonts/NotoSansKR-Regular.ttf");
 
 struct FontSet {
     en: Font,
@@ -71,7 +71,9 @@ pub fn measure_text_height(text: &str, max_width: f32, font_size: f32) -> f32 {
         }
 
         if let BreakOpportunity::Mandatory = opportunity {
-            if offset < text_len {
+            let is_cr = text[..offset].ends_with('\r');
+
+            if !is_cr && offset < text_len {
                 lines += 1;
                 current_line_width = 0.0;
             }
