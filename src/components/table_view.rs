@@ -117,7 +117,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
             let total_width = rect.width();
             let cols = data_for_resize.columns.len().max(1);
             let width_per_col = (total_width - 50.0) / cols as f64;
-            let new_width = width_per_col.max(20.0);
+            let new_width = width_per_col.max(100.0);
 
             if (new_width - col_width.get_untracked()).abs() > 0.5 {
                 set_col_width.set(new_width);
