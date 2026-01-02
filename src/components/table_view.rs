@@ -432,17 +432,18 @@ where
                             children=move |i| {
                                 each.with(|items| {
                                     if let Some(item) = items.get(i) {
-                                        let top = tree.with(|t| if i == 0 { 0 } else { t.prefix_sum(i - 1) });
-                                        let height = tree.with(|t| t.get(i));
-
                                         view! {
                                             <div
-                                                style=format!(
-                                                    "position: absolute; width: 100%; top: {}px; height: {}px; {}",
-                                                    top,
-                                                    height,
-                                                    inner_el_style,
-                                                )
+                                                style=move || {
+                                                    let top = tree.with(|t| if i == 0 { 0 } else { t.prefix_sum(i - 1) });
+                                                    let height = tree.with(|t| t.get(i));
+                                                    format!(
+                                                        "position: absolute; width: 100%; top: {}px; height: {}px; {}",
+                                                        top,
+                                                        height,
+                                                        inner_el_style,
+                                                    )
+                                                }
                                             >
                                                 {children((i, item))}
                                             </div>
