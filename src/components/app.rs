@@ -14,6 +14,7 @@ pub fn App() -> impl IntoView {
     let (tables, set_tables) = signal(HashMap::<String, Arc<TableData>>::new());
     let (selected_table_name, set_selected_table_name) = signal(Option::<String>::None);
     let (is_loading, set_is_loading) = signal(false);
+    let (sidebar_open, set_sidebar_open) = signal(true);
 
     let current_table_data = move || {
         selected_table_name
@@ -81,24 +82,62 @@ pub fn App() -> impl IntoView {
 
     view! {
         <div style="display: flex; height: 100vh; overflow: hidden; font-family: sans-serif;">
-            <div style="width: 250px; background: #f4f4f4; border-right: 1px solid #ccc; display: flex; flex-direction: column;">
-                <div style="padding: 10px; border-bottom: 1px solid #ddd;">
-                    <h3>"BA Decoder"</h3>
-                    <input type="file" on:change=on_file_change accept=".db,.bytes" />
-                    {move || if is_loading.get() { view! { <div>"Loading..."</div> }.into_any() } else { view! {}.into_any() }}
-                </div>
+            <div style=move || format!(
+                "width: {}; background: #f4f4f4; border-right: 1px solid #ccc; display: flex; flex-direction: column; transition: width 0.3s ease; overflow: hidden;",
+                if sidebar_open.get() { "250px" } else { "0px" }
+            )>
+                <div style="min-width: 250px; display: flex; flex-direction: column; height: 100%;">
+                    <div style="padding: 10px; border-bottom: 1px solid #ddd;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <h3 style="margin: 0;">"BA Decoder"</h3>
+                            <button
+                                on:click=move |_| set_sidebar_open.set(false)
+                                style="cursor: pointer; background: none; border: none; font-weight: bold; font-size: 1.2rem; padding: 2px;"
+                                title="Collapse Sidebar"
+                            >
+                                "❮"
+                            </button>
+                        </div>
+                        <input type="file" on:change=on_file_change accept=".db,.bytes" />
+                        {move || if is_loading.get() { view! { <div>"Loading..."</div> }.into_any() } else { view! {}.into_any() }}
+                    </div>
 
-                <Sidebar
-                    tables=tables.into()
-                    selected=selected_table_name.into()
-                    on_select=set_selected_table_name
-                />
+                    <Sidebar
+                        tables=tables.into()
+                        selected=selected_table_name.into()
+                        on_select=set_selected_table_name
+                    />
+                </div>
             </div>
 
-            <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+            <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative;">
                 {move || match current_table_data() {
-                    Some(data) => view! { <TableView data=data /> }.into_any(),
-                    None => view! { <div style="padding: 20px;">"Select a table to view"</div> }.into_any()
+                    Some(data) => view! {
+                        <TableView
+                            data=data
+                            is_sidebar_open=sidebar_open
+                            set_sidebar_open=set_sidebar_open
+                        />
+                    }.into_any(),
+                    None => {
+                        // If the sidebar is closed but no table is selected, we still need a way to open it.
+                        if !sidebar_open.get() {
+                            view! {
+                                <div style="padding: 10px; border-bottom: 1px solid #eee; background: #fff; display: flex; align-items: center;">
+                                    <button
+                                        on:click=move |_| set_sidebar_open.set(true)
+                                        style="cursor: pointer; background: none; border: none; font-weight: bold; font-size: 1.2rem; padding: 5px; color: #555; margin-right: 10px;"
+                                        title="Expand Sidebar"
+                                    >
+                                        "❯"
+                                    </button>
+                                    <span>"Select a table to view"</span>
+                                </div>
+                            }.into_any()
+                        } else {
+                            view! { <div style="padding: 20px;">"Select a table to view"</div> }.into_any()
+                        }
+                    }
                 }}
             </div>
         </div>

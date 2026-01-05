@@ -107,7 +107,11 @@ struct ResizeState {
 }
 
 #[component]
-pub fn TableView(data: Arc<TableData>) -> impl IntoView {
+pub fn TableView(
+    data: Arc<TableData>,
+    #[prop(into)] is_sidebar_open: Signal<bool>,
+    #[prop(into)] set_sidebar_open: WriteSignal<bool>,
+) -> impl IntoView {
     let (filter_query, set_filter_query) = signal(String::new());
 
     let data_for_filter = data.clone();
@@ -288,7 +292,22 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
 
     view! {
         <div style="display: flex; flex-direction: column; height: 100%;">
-            <div style="padding: 10px; border-bottom: 1px solid #ccc; background: #fff;">
+            <div style="padding: 10px; border-bottom: 1px solid #ccc; background: #fff; display: flex; align-items: center;">
+                // Integrated Open Button
+                {move || if !is_sidebar_open.get() {
+                    view! {
+                         <button
+                             on:click=move |_| set_sidebar_open.set(true)
+                             style="cursor: pointer; background: none; border: none; font-weight: bold; font-size: 1.2rem; padding: 0 8px 0 0; color: #555; margin-right: 5px;"
+                             title="Expand Sidebar"
+                         >
+                             "❯"
+                         </button>
+                    }.into_any()
+                } else {
+                    view! {}.into_any()
+                }}
+
                 <strong>{data.name.clone()}</strong>
                 <span style="margin: 0 10px; color: #666;">
                     {move || format!("{} rows", filtered_rows.get().len())}
@@ -324,10 +343,8 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                                         start_x,
                                         start_width: current_width,
                                     }));
-                                    // Prevent text selection during drag
                                     ev.prevent_default();
                                 }
-                                // Optional: visual hover effect for handle
                                 on:mouseover=move |ev: ev::MouseEvent| {
                                     let target: leptos::web_sys::HtmlElement = event_target(&ev);
                                     let _ = target.style().set_property("background-color", "#ccc");
