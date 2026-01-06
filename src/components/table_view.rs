@@ -236,7 +236,7 @@ pub fn TableView(
             return (0..rows.len()).collect::<Vec<_>>();
         }
 
-        let re = Regex::new(&query)
+        let re = Regex::new(&format!("(?i){}", query))
             .ok()
             .or_else(|| Regex::new(&regex::escape(&query)).ok());
 
@@ -405,14 +405,10 @@ pub fn TableView(
 
 fn row_matches(row: &[Value], re: &Regex) -> bool {
     for val in row {
-        let text = match val {
-            Value::Text(s) => s.as_str(),
-            Value::Integer(i) => return re.is_match(&i.to_string()),
-            Value::Real(f) => return re.is_match(&f.to_string()),
-            _ => "",
-        };
-        if re.is_match(text) {
-            return true;
+        if let Value::Text(s) = val {
+            if re.is_match(s) {
+                return true;
+            }
         }
     }
     false
