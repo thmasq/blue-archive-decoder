@@ -11,7 +11,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
 
-const MIN_COL_WIDTH: f64 = 100.0;
+const MIN_COL_WIDTH: f64 = 50.0;
 
 #[derive(Clone, Debug)]
 pub struct FenwickTree {
@@ -107,11 +107,7 @@ struct ResizeState {
 }
 
 #[component]
-pub fn TableView(
-    data: Arc<TableData>,
-    #[prop(into)] is_sidebar_open: Signal<bool>,
-    #[prop(into)] set_sidebar_open: WriteSignal<bool>,
-) -> impl IntoView {
+pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     let (filter_query, set_filter_query) = signal(String::new());
 
     let data_for_filter = data.clone();
@@ -120,18 +116,18 @@ pub fn TableView(
 
     let initial_col_count = data.columns.len().max(1);
 
-    let (display_widths, set_display_widths) = signal(vec![MIN_COL_WIDTH; initial_col_count]);
-    let (measured_widths, set_measured_widths) = signal(vec![MIN_COL_WIDTH; initial_col_count]);
+    let (display_widths, set_display_widths) = signal(vec![100.0; initial_col_count]);
+    let (measured_widths, set_measured_widths) = signal(vec![100.0; initial_col_count]);
     let (manual_resize_triggered, set_manual_resize_triggered) = signal(false);
 
-    let default_row_height = 30;
-    let (computed_font_size, set_computed_font_size) = signal(16.0f32);
+    let default_row_height = 24;
+    let (computed_font_size, set_computed_font_size) = signal(13.0f32);
     let header_ref = NodeRef::<Div>::new();
     let scroll_view_ref = NodeRef::<Div>::new();
     let (scrollbar_width, set_scrollbar_width) = signal(12.0);
 
     let (resizing, set_resizing) = signal::<Option<ResizeState>>(None);
-    let (resize_trigger, set_resize_trigger) = signal(0); // Forces VirtualScroller update
+    let (resize_trigger, set_resize_trigger) = signal(0);
 
     let _ = use_event_listener(window(), ev::mousemove, move |ev| {
         if let Some(state) = resizing.get() {
@@ -165,13 +161,12 @@ pub fn TableView(
                 let rect = entry.content_rect();
                 let total_width = rect.width();
                 let cols = initial_col_count;
-                let width_per_col = (total_width - 50.0) / cols as f64;
-                let new_width = width_per_col.max(MIN_COL_WIDTH);
+                let width_per_col = (total_width / cols as f64).max(80.0).min(200.0);
 
                 set_display_widths.update(|widths| {
                     let current_avg = widths.iter().sum::<f64>() / widths.len() as f64;
-                    if (current_avg - new_width).abs() > 0.5 {
-                        *widths = vec![new_width; cols];
+                    if (current_avg - width_per_col).abs() > 0.5 {
+                        *widths = vec![width_per_col; cols];
 
                         set_measured_widths.set(widths.clone());
                         set_resize_trigger.update(|n| *n += 1);
@@ -214,11 +209,11 @@ pub fn TableView(
             if let Ok(Some(style)) = window.get_computed_style(&el) {
                 let font_size_str = style
                     .get_property_value("font-size")
-                    .unwrap_or("16px".into());
+                    .unwrap_or("13px".into());
                 let size = font_size_str
                     .trim_end_matches("px")
                     .parse::<f32>()
-                    .unwrap_or(16.0);
+                    .unwrap_or(13.0);
 
                 if (size - computed_font_size.get_untracked()).abs() > 0.1 {
                     set_computed_font_size.set(size);
@@ -269,7 +264,7 @@ pub fn TableView(
                 } else {
                     MIN_COL_WIDTH
                 };
-                let usable_width = (col_w as f32 - 10.0).max(10.0);
+                let usable_width = (col_w as f32 - 8.0).max(10.0);
 
                 let height = measure_text_height(text, usable_width, current_font_size);
                 if height > max_height {
@@ -287,54 +282,44 @@ pub fn TableView(
             .map(|w| format!("{}px", w))
             .collect::<Vec<_>>()
             .join(" ");
-        format!("50px {}", cols_str)
+        format!("46px {}", cols_str)
     };
 
     view! {
         <div style="display: flex; flex-direction: column; height: 100%;">
-            <div style="padding: 10px; border-bottom: 1px solid #ccc; background: #fff; display: flex; align-items: center;">
-                // Integrated Open Button
-                {move || if !is_sidebar_open.get() {
-                    view! {
-                         <button
-                             on:click=move |_| set_sidebar_open.set(true)
-                             style="cursor: pointer; background: none; border: none; font-weight: bold; font-size: 1.2rem; padding: 0 8px 0 0; color: #555; margin-right: 5px;"
-                             title="Expand Sidebar"
-                         >
-                             "❯"
-                         </button>
-                    }.into_any()
-                } else {
-                    view! {}.into_any()
-                }}
 
-                <strong>{data.name.clone()}</strong>
-                <span style="margin: 0 10px; color: #666;">
-                    {move || format!("{} rows", filtered_rows.get().len())}
-                </span>
-                <input
-                    type="text"
-                    placeholder="Search (Regex supported)..."
-                    prop:value=move || filter_query.get()
-                    on:input=move |ev| set_filter_query.set(event_target_value(&ev))
-                    style="padding: 4px; width: 200px;"
-                />
+            <div style="background: #ffffff; border-bottom: 1px solid #dadce0; padding: 4px 8px; display: flex; align-items: center; gap: 8px; height: 32px; box-sizing: border-box;">
+                <div style="color: #9aa0a6; font-style: italic; font-weight: bold; font-family: serif; user-select: none;">
+                    "fx"
+                </div>
+                <div style="flex: 1; position: relative;">
+                     <input
+                        type="text"
+                        placeholder="Search / Filter..."
+                        prop:value=move || filter_query.get()
+                        on:input=move |ev| set_filter_query.set(event_target_value(&ev))
+                        style="width: 100%; border: none; background: transparent; font-size: 13px; outline: none; padding: 4px;"
+                    />
+                </div>
+                <div style="font-size: 0.8rem; color: #5f6368; user-select: none;">
+                    {move || format!("{} records", filtered_rows.get().len())}
+                </div>
             </div>
 
             <div
                 node_ref=header_ref
-                style=move || format!("display: grid; grid-template-columns: {}; background: #eee; font-weight: bold; border-bottom: 1px solid #999; padding-right: {}px; overflow-x: hidden;", grid_template(), scrollbar_width.get())
+                style=move || format!("display: grid; grid-template-columns: {}; background: #f8f9fa; border-bottom: 1px solid #c0c0c0; padding-right: {}px; overflow-x: hidden; user-select: none;", grid_template(), scrollbar_width.get())
             >
-                <div style="padding: 4px; border-right: 1px solid #ccc;">"#"</div>
+                <div style="border-right: 1px solid #c0c0c0; background: #f8f9fa;"></div>
+
                 {
                     data.columns.iter().enumerate().map(|(i, col)| view! {
-                        <div style="position: relative; padding: 4px; border-right: 1px solid #ccc; overflow: hidden; display: flex; align-items: center;">
-                            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%;">
+                        <div style="position: relative; padding: 4px 6px; border-right: 1px solid #c0c0c0; color: #5f6368; font-weight: 700; font-size: 11px; display: flex; align-items: center; justify-content: center; height: 24px;">
+                            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; text-align: center;">
                                 {col.clone()}
                             </span>
-                            // Resizer Handle
                             <div
-                                style="position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: col-resize; z-index: 10;"
+                                style="position: absolute; right: 0; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 10;"
                                 on:mousedown=move |ev| {
                                     let start_x = ev.client_x() as f64;
                                     let current_width = display_widths.with(|w| w.get(i).copied().unwrap_or(MIN_COL_WIDTH));
@@ -347,7 +332,7 @@ pub fn TableView(
                                 }
                                 on:mouseover=move |ev: ev::MouseEvent| {
                                     let target: leptos::web_sys::HtmlElement = event_target(&ev);
-                                    let _ = target.style().set_property("background-color", "#ccc");
+                                    let _ = target.style().set_property("background-color", "#4285f4");
                                 }
                                 on:mouseout=move |ev: ev::MouseEvent| {
                                     let target: leptos::web_sys::HtmlElement = event_target(&ev);
@@ -359,7 +344,7 @@ pub fn TableView(
                 }
             </div>
 
-            <div style="flex: 1; overflow-y: hidden;">
+            <div style="flex: 1; overflow-y: hidden; background: #fff;">
                 <VirtualScroller
                     each=filtered_rows
                     key=move |(_, idx)| *idx
@@ -374,21 +359,21 @@ pub fn TableView(
                         let row: &Vec<Value> = &data_for_scroller.rows[*row_idx];
 
                         view! {
-                            <div style=move || format!("display: grid; grid-template-columns: {}; border-bottom: 1px solid #eee; height: 100%; align-items: start;", grid_template())>
-                                <div style="padding: 6px 4px; color: #888; border-right: 1px solid #eee; font-size: 0.8em; height: 100%; display: flex; align-items: center;">
+                            <div style=move || format!("display: grid; grid-template-columns: {}; height: 100%; align-items: start;", grid_template())>
+                                <div style="background: #f8f9fa; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #ccc; color: #5f6368; font-size: 11px; display: flex; align-items: center; justify-content: center; height: 100%; user-select: none;">
                                     {(*row_idx + 1).to_string()}
                                 </div>
                                 {row.iter().map(|val| {
-                                    let (txt, color) = match val {
-                                        Value::Null => ("NULL".to_string(), "#ccc"),
-                                        Value::Integer(i) => (i.to_string(), "#00f"),
-                                        Value::Real(f) => (f.to_string(), "#090"),
-                                        Value::Text(s) => (s.clone(), "#000"),
-                                        Value::Blob(b) => (format!("<Blob {}b>", b.len()), "#a0a"),
+                                    let (txt, color, align) = match val {
+                                        Value::Null => ("".to_string(), "#ccc", "left"),
+                                        Value::Integer(i) => (i.to_string(), "#1155cc", "right"),
+                                        Value::Real(f) => (f.to_string(), "#090", "right"),
+                                        Value::Text(s) => (s.clone(), "#000", "left"),
+                                        Value::Blob(b) => (format!("<Blob {}b>", b.len()), "#a0a", "center"),
                                     };
 
                                     view! {
-                                        <div style=format!("padding: 6px 4px; border-right: 1px solid #eee; overflow: hidden; white-space: pre-wrap; word-wrap: break-word; line-height: 1.25; color: {};", color)
+                                        <div style=format!("padding: 2px 5px; border-right: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0; overflow: hidden; white-space: pre-wrap; word-wrap: break-word; line-height: 1.3; font-size: 13px; color: {}; text-align: {}; height: 100%;", color, align)
                                             title=txt.clone()>
                                             {txt.clone()}
                                         </div>
