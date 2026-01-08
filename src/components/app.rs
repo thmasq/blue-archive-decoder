@@ -76,7 +76,14 @@ pub fn App() -> impl IntoView {
 
             <div style="background: #ffffff; border-bottom: 1px solid #dadce0; padding: 8px 16px; display: flex; align-items: center; justify-content: space-between; height: 48px; box-sizing: border-box;">
                 <div style="display: flex; align-items: center; gap: 16px;">
-                    <h3 style="margin: 0; color: #444; font-size: 1.1rem; font-weight: 500;">"BA Decoder"</h3>
+                    <h3 style="margin: 0; color: #444; font-size: 1.1rem; font-weight: 500;">
+                        {move || {
+                            match selected_table_name.get() {
+                                Some(name) => format!("BA Decoder - {}", name),
+                                None => "BA Decoder".to_string(),
+                            }
+                        }}
+                    </h3>
                 </div>
 
                 <div style="display: flex; align-items: center; gap: 10px;">

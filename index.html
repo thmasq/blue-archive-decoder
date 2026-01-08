@@ -30,15 +30,37 @@
             margin: 0; 
             padding: 0; 
             font-family: 'Noto Sans', 'Noto Sans JP', 'Noto Sans KR', sans-serif; 
+            background-color: #f0f0f0;
+        }
+        
+        #error-container {
+            display: none;
+            padding: 20px;
+            background-color: #ffdddd;
+            color: #d8000c;
+            border: 1px solid #d8000c;
+            margin: 20px;
+            white-space: pre-wrap;
+            font-family: monospace;
         }
     </style>
 </head>
 <body>
+    <div id="error-container"></div>
+    
     <script type="module">
         import init from './pkg/blue_archive_decoder.js';
 
         async function run() {
-            await init();
+            try {
+                await init();
+                console.log("Wasm loaded successfully");
+            } catch (e) {
+                console.error("Failed to load Wasm:", e);
+                const errorBox = document.getElementById('error-container');
+                errorBox.style.display = 'block';
+                errorBox.textContent = `Error loading application:\n${e}`;
+            }
         }
 
         run();
