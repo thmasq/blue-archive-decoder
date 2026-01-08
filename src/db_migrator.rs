@@ -1,4 +1,30 @@
-use crate::blue_archive_generated::global::*;
+#![allow(clippy::items_after_statements)]
+
+use crate::blue_archive_generated::global::{
+    CharacterDialogEmojiExcel, CharacterDialogEventExcel, CharacterDialogExcel,
+    CharacterDialogSubtitleExcel, CharacterGearExcel, CharacterGearLevelExcel,
+    CharacterPotentialExcel, CharacterPotentialRewardExcel, CharacterPotentialStatExcel,
+    CharacterVoiceExcel, CharacterVoiceSubtitleExcel, CombatEmojiExcel,
+    ContentEnterCostReduceExcel, ContentSpoilerPopupExcel, ContentsScenarioExcel,
+    ContentsShortcutExcel, CurrencyExcel, EventContentNotifyExcel, EventContentSpoilerPopupExcel,
+    EventContentTreasureCellRewardExcel, EventContentTreasureExcel,
+    EventContentTreasureRewardExcel, EventContentTreasureRoundExcel,
+    FarmingDungeonLocationManageExcel, FavorLevelExcel, FavorLevelRewardExcel,
+    FixedEchelonSettingExcel, FormationLocationExcel, GroundModuleRewardExcel,
+    IdCardBackgroundExcel, InformationExcel, LoadingImageExcel, LocalizeErrorExcel,
+    LocalizeEtcExcel, LocalizeExcel, LocalizeSkillExcel, MemoryLobby_GlobalExcel, MemoryLobbyExcel,
+    MessagePopupExcel, MissionEmergencyCompleteExcel, ScenarioBGName_GlobalExcel,
+    ScenarioBGNameExcel, ScenarioCharacterEmotionExcel, ScenarioCharacterNameExcel,
+    ScenarioCharacterSituationSetExcel, ScenarioContentCollectionExcel, ScenarioEffectExcel,
+    ScenarioModeExcel, ScenarioModeRewardExcel, ScenarioResourceInfoExcel, ScenarioScriptExcel,
+    ScenarioTransitionExcel, SchoolDungeonRewardExcel, SchoolDungeonStageExcel, ServiceActionExcel,
+    ShortcutTypeExcel, SkillAdditionalTooltipExcel, SoundUIExcel, SpineLipsyncExcel,
+    StageFileRefreshSettingExcel, StatLevelInterpolationExcel, StickerGroupExcel,
+    StickerPageContentExcel, StoryStrategyExcel, ToastExcel, TutorialCharacterDialogExcel,
+    TutorialExcel, TutorialFailureImageExcel, UnderCoverStageExcel, Video_GlobalExcel, VideoExcel,
+    VoiceCommonExcel, VoiceExcel, VoiceLogicEffectExcel, VoiceRoomExceptionExcel, VoiceSpineExcel,
+    VoiceTimelineExcel,
+};
 use sqlite_wasm_reader::{Database, SelectQuery, Value};
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -11,21 +37,18 @@ pub type TableLoader = Box<
     ) -> Result<(Vec<String>, Vec<Vec<Value>>), Box<dyn std::error::Error>>,
 >;
 
-/// Converts a serde_json::Value to a sqlite_wasm_reader::Value
+/// Converts a `serde_json::Value` to a `sqlite_wasm_reader::Value`
 fn json_to_sqlite_value(val: &serde_json::Value) -> Value {
     match val {
         serde_json::Value::Null => Value::Null,
-        serde_json::Value::Bool(b) => Value::Integer(if *b { 1 } else { 0 }),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Value::Integer(i)
-            } else if let Some(f) = n.as_f64() {
-                Value::Real(f)
-            } else {
-                // Fallback for types that fit neither (should be rare in this context)
-                Value::Text(n.to_string())
-            }
-        }
+        serde_json::Value::Bool(b) => Value::Integer(i64::from(*b)),
+        serde_json::Value::Number(n) => n.as_i64().map_or_else(
+            || {
+                n.as_f64()
+                    .map_or_else(|| Value::Text(n.to_string()), Value::Real)
+            },
+            Value::Integer,
+        ),
         serde_json::Value::String(s) => Value::Text(s.clone()),
         // Serialize Arrays and Objects back to JSON strings for storage/display
         serde_json::Value::Array(_) | serde_json::Value::Object(_) => Value::Text(val.to_string()),
@@ -112,7 +135,9 @@ macro_rules! register_table {
     };
 }
 
-pub fn register_loaders(registry: &mut HashMap<String, TableLoader>) {
+pub fn register_loaders<S: ::std::hash::BuildHasher>(
+    registry: &mut HashMap<String, TableLoader, S>,
+) {
     // register_table!(registry, AccountLevel);
     // register_table!(registry, AssistEchelonTypeConvert);
     // register_table!(registry, Attendance);

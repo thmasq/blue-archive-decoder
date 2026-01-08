@@ -5,11 +5,26 @@ use sqlite_wasm_reader::{Database, SelectQuery, Value};
 use std::collections::HashMap;
 use std::io::Cursor;
 
+/// Loads all tables from a `SQLite` database binary and converts them into [`TableData`] structures.
+///
+/// This function initializes an in-memory `SQLite` database from the provided file bytes,
+/// applies any registered custom loaders, then iterates over the remaining tables found
+/// in the database schema. After loading, it performs additional post-processing to enrich
+/// certain tables (such as resolving speaker names in scenario scripts).
+///
+/// # Errors
+///
+/// Returns an `Err(String)` if the `SQLite` database cannot be opened or initialized from
+/// the provided `file_data`, or if the list of tables cannot be retrieved from the database
+/// schema. The error string contains a human-readable description of the failure.
+///
+/// Errors originating from individual table queries or custom loaders are logged and
+/// skipped, and do **not** cause this function to return an error.
 pub fn load_tables(file_data: Vec<u8>) -> Result<HashMap<String, TableData>, String> {
     web_sys::console::log_1(&"loader::load_tables called.".into());
 
     let cursor = Cursor::new(file_data);
-    let mut db = Database::new(cursor).map_err(|e| format!("Failed to open DB: {}", e))?;
+    let mut db = Database::new(cursor).map_err(|e| format!("Failed to open DB: {e}"))?;
 
     web_sys::console::log_1(&"Database initialized successfully.".into());
 
@@ -22,7 +37,7 @@ pub fn load_tables(file_data: Vec<u8>) -> Result<HashMap<String, TableData>, Str
 
     for (name, loader) in loaders {
         if let Ok((cols, rows)) = loader(&mut db) {
-            web_sys::console::log_1(&format!("Loaded custom table: {}", name).into());
+            web_sys::console::log_1(&format!("Loaded custom table: {name}").into());
             tables.insert(
                 name.clone(),
                 TableData {
@@ -78,9 +93,8 @@ pub fn load_tables(file_data: Vec<u8>) -> Result<HashMap<String, TableData>, Str
 }
 
 fn enrich_scenario_script(tables: &mut HashMap<String, TableData>) {
-    let name_table = match tables.get("ScenarioCharacterNameExcel") {
-        Some(t) => t,
-        None => return,
+    let Some(name_table) = tables.get("ScenarioCharacterNameExcel") else {
+        return;
     };
 
     let id_col_idx = name_table
@@ -127,12 +141,12 @@ fn enrich_scenario_script(tables: &mut HashMap<String, TableData>) {
                         let name_part = parts[1];
 
                         let hash_u32 = xxhash32(name_part.as_bytes(), 0);
-                        let hash_i64 = hash_u32 as i64;
+                        let hash_i64 = i64::from(hash_u32);
 
                         if let Some(en_name) = name_map.get(&hash_i64) {
                             decoded_name = Value::Text(en_name.clone());
                         } else {
-                            decoded_name = Value::Text(format!("{} (?)", name_part));
+                            decoded_name = Value::Text(format!("{name_part} (?)"));
                         }
                     }
                 }

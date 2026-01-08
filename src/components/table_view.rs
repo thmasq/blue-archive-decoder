@@ -23,6 +23,7 @@ pub struct FenwickTree {
 }
 
 impl FenwickTree {
+    #[must_use]
     pub fn new(size: usize, default_value: i64) -> Self {
         let mut tree = vec![0i64; size + 1];
         for i in 1..=size {
@@ -46,6 +47,7 @@ impl FenwickTree {
         }
     }
 
+    #[must_use]
     pub fn prefix_sum(&self, index: usize) -> i64 {
         let mut i = (index + 1).min(self.size);
         let mut sum = 0;
@@ -56,6 +58,7 @@ impl FenwickTree {
         sum
     }
 
+    #[must_use]
     pub fn get(&self, index: usize) -> i64 {
         if index >= self.size {
             return 0;
@@ -69,6 +72,7 @@ impl FenwickTree {
         current - prev
     }
 
+    #[must_use]
     pub fn total_sum(&self) -> i64 {
         if self.size == 0 {
             0
@@ -77,6 +81,7 @@ impl FenwickTree {
         }
     }
 
+    #[must_use]
     pub fn lower_bound(&self, value: i64) -> usize {
         if self.size == 0 {
             return 0;
@@ -90,11 +95,9 @@ impl FenwickTree {
 
         while bit_mask > 0 {
             let t_idx = idx + bit_mask;
-            if t_idx <= self.size {
-                if current_sum + self.tree[t_idx] <= value {
-                    idx = t_idx;
-                    current_sum += self.tree[t_idx];
-                }
+            if t_idx <= self.size && current_sum + self.tree[t_idx] <= value {
+                idx = t_idx;
+                current_sum += self.tree[t_idx];
             }
             bit_mask >>= 1;
         }
@@ -109,7 +112,9 @@ struct ResizeState {
     start_width: f64,
 }
 
+#[must_use]
 #[component]
+#[allow(clippy::too_many_lines)]
 pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     let (filter_query, set_filter_query) = signal(String::new());
 
@@ -136,7 +141,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
 
     let _ = use_event_listener(window(), ev::mousemove, move |ev| {
         if let Some(state) = resizing.get() {
-            let current_x = ev.client_x() as f64;
+            let current_x = f64::from(ev.client_x());
             let delta = current_x - state.start_x;
             let new_width = (state.start_width + delta).max(MIN_COL_WIDTH);
 
@@ -161,23 +166,23 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     });
 
     use_resize_observer(header_ref, move |entries, _| {
-        if let Some(entry) = entries.first() {
-            if !manual_resize_triggered.get_untracked() {
-                let rect = entry.content_rect();
-                let total_width = rect.width();
-                let cols = initial_col_count;
-                let width_per_col = (total_width / cols as f64).max(80.0).min(200.0);
+        if let Some(entry) = entries.first()
+            && !manual_resize_triggered.get_untracked()
+        {
+            let rect = entry.content_rect();
+            let total_width = rect.width();
+            let cols = initial_col_count;
+            let width_per_col = (total_width / cols as f64).clamp(80.0, 200.0);
 
-                set_display_widths.update(|widths| {
-                    let current_avg = widths.iter().sum::<f64>() / widths.len() as f64;
-                    if (current_avg - width_per_col).abs() > 0.5 {
-                        *widths = vec![width_per_col; cols];
+            set_display_widths.update(|widths| {
+                let current_avg = widths.iter().sum::<f64>() / widths.len() as f64;
+                if (current_avg - width_per_col).abs() > 0.5 {
+                    *widths = vec![width_per_col; cols];
 
-                        set_measured_widths.set(widths.clone());
-                        set_resize_trigger.update(|n| *n += 1);
-                    }
-                });
-            }
+                    set_measured_widths.set(widths.clone());
+                    set_resize_trigger.update(|n| *n += 1);
+                }
+            });
         }
     });
 
@@ -198,7 +203,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
         let width = div_html.offset_width() - div.client_width();
 
         div.remove();
-        set_scrollbar_width.set(width as f64);
+        set_scrollbar_width.set(f64::from(width));
     });
 
     let _ = use_event_listener(scroll_view_ref, leptos::ev::scroll, move |ev| {
@@ -216,19 +221,17 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
             return (0..rows.len()).collect::<Vec<_>>();
         }
 
-        let re = Regex::new(&format!("(?i){}", query))
+        let re = Regex::new(&format!("(?i){query}"))
             .ok()
             .or_else(|| Regex::new(&regex::escape(&query)).ok());
 
-        if let Some(re) = re {
+        re.map_or_else(std::vec::Vec::new, |re| {
             rows.iter()
                 .enumerate()
                 .filter(|(_, row)| row_matches(row, &re))
                 .map(|(i, _)| i)
                 .collect()
-        } else {
-            vec![]
-        }
+        })
     });
 
     let export_csv = move |_| {
@@ -249,7 +252,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
             .collect();
 
         if let Err(e) = wtr.write_record(&headers) {
-            web_sys::console::error_1(&format!("Failed to write headers: {}", e).into());
+            web_sys::console::error_1(&format!("Failed to write headers: {e}").into());
             return;
         }
 
@@ -266,13 +269,13 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                     Value::Text(t) => t.clone(),
                     Value::Integer(n) => n.to_string(),
                     Value::Real(f) => f.to_string(),
-                    Value::Null => "".to_string(),
+                    Value::Null => String::new(),
                     Value::Blob(b) => format!("<Blob {}b>", b.len()),
                 })
                 .collect();
 
             if let Err(e) = wtr.write_record(&row_strings) {
-                web_sys::console::error_1(&format!("Failed to write row: {}", e).into());
+                web_sys::console::error_1(&format!("Failed to write row: {e}").into());
                 return;
             }
         }
@@ -308,7 +311,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                     Err(e) => web_sys::console::error_1(&e),
                 }
             }
-            Err(e) => web_sys::console::error_1(&format!("Failed to flush CSV: {}", e).into()),
+            Err(e) => web_sys::console::error_1(&format!("Failed to flush CSV: {e}").into()),
         }
     };
 
@@ -352,10 +355,10 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
             .iter()
             .enumerate()
             .filter(|(i, _)| !hidden.contains(i))
-            .map(|(_, w)| format!("{}px", w))
+            .map(|(_, w)| format!("{w}px"))
             .collect::<Vec<_>>()
             .join(" ");
-        format!("46px {}", cols_str)
+        format!("46px {cols_str}")
     };
 
     view! {
@@ -385,7 +388,9 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                         "Export CSV"
                     </button>
                     {move || {
-                        if !hidden_indices.get().is_empty() {
+                        if hidden_indices.get().is_empty() {
+                            ().into_any()
+                        } else {
                             view! {
                                 <button
                                     on:click=move |_| {
@@ -397,8 +402,6 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                                     "Reset Columns"
                                 </button>
                             }.into_any()
-                        } else {
-                            view! {}.into_any()
                         }
                     }}
                 </div>
@@ -440,7 +443,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                             <div
                                 style="position: absolute; right: 0; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 10;"
                                 on:mousedown=move |ev| {
-                                    let start_x = ev.client_x() as f64;
+                                    let start_x = f64::from(ev.client_x());
                                     let current_width = display_widths.with(|w| w.get(i).copied().unwrap_or(MIN_COL_WIDTH));
                                     set_resizing.set(Some(ResizeState {
                                         col_idx: i,
@@ -485,7 +488,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                                 </div>
                                 {row.iter().enumerate().filter(|(i, _)| !hidden.contains(i)).map(|(_, val)| {
                                     let (txt, color, align) = match val {
-                                        Value::Null => ("".to_string(), "#ccc", "left"),
+                                        Value::Null => (String::new(), "#ccc", "left"),
                                         Value::Integer(i) => (i.to_string(), "#1155cc", "right"),
                                         Value::Real(f) => (f.to_string(), "#090", "right"),
                                         Value::Text(s) => (s.clone(), "#000", "left"),
@@ -494,7 +497,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
 
                                     view! {
                                         <div style=format!("box-sizing: border-box; padding: 4px 5px; border-right: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0; overflow: hidden; white-space: pre-wrap; word-wrap: break-word; line-height: 1.3; font-size: {}px; color: {}; text-align: {}; height: 100%;", FONT_SIZE, color, align)
-                                            title=txt.clone()>
+                                            title=txt>
                                             {txt.clone()}
                                         </div>
                                     }
@@ -510,16 +513,17 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
 
 fn row_matches(row: &[Value], re: &Regex) -> bool {
     for val in row {
-        if let Value::Text(s) = val {
-            if re.is_match(s) {
-                return true;
-            }
+        if let Value::Text(s) = val
+            && re.is_match(s)
+        {
+            return true;
         }
     }
     false
 }
 
 #[component]
+#[allow(clippy::too_many_lines)]
 pub fn VirtualScroller<T, S, K, KN, C, N, IH>(
     #[prop()] each: S,
     #[prop()] key: KN,
@@ -543,7 +547,7 @@ where
 
     let window_height = RwSignal::new(0usize);
     let scroll_top = RwSignal::new(0usize);
-    let container = node_ref.unwrap_or_else(NodeRef::new);
+    let container = node_ref.unwrap_or_default();
 
     Effect::new(move |_| {
         if let Some(trigger) = reset_trigger {
@@ -565,7 +569,7 @@ where
         });
     });
 
-    let inner_height = Memo::new(move |_| tree.with(|t| t.total_sum()));
+    let inner_height = Memo::new(move |_| tree.with(FenwickTree::total_sum));
 
     use_resize_observer(container, move |entries, _| {
         if let Some(entry) = entries.first() {
@@ -594,7 +598,7 @@ where
     });
 
     let buffer_bounds = Memo::new(move |_| {
-        let items_len = each.with(|i| i.len());
+        let items_len = each.with(std::vec::Vec::len);
         let (start, end) = index_bounds.get();
 
         let buffer_start = start.saturating_sub(2);
@@ -646,6 +650,7 @@ where
             style="width: 100%; height: 100%; overflow-y: scroll; overflow-x: auto; will-change: transform;"
             on:scroll=move |ev| {
                 let target: leptos::web_sys::HtmlElement = event_target(&ev);
+                #[allow(clippy::cast_sign_loss)]
                 scroll_top.set(target.scroll_top() as usize);
             }
         >
@@ -670,26 +675,27 @@ where
                             }
                             children=move |i| {
                                 each.with(|items| {
-                                    if let Some(item) = items.get(i) {
-                                        view! {
-                                            <div
-                                                style=move || {
-                                                    let top = tree.with(|t| if i == 0 { 0 } else { t.prefix_sum(i - 1) });
-                                                    let height = tree.with(|t| t.get(i));
-                                                    format!(
-                                                        "position: absolute; width: 100%; top: {}px; height: {}px; {}",
-                                                        top,
-                                                        height,
-                                                        inner_el_style,
-                                                    )
-                                                }
-                                            >
-                                                {children((i, item))}
-                                            </div>
-                                        }.into_any()
-                                    } else {
-                                        ().into_any()
-                                    }
+                                    items.get(i).map_or_else(
+                                        || ().into_any(),
+                                        |item| {
+                                            view! {
+                                                <div
+                                                    style=move || {
+                                                        let top = tree.with(|t| {
+                                                            if i == 0 { 0 } else { t.prefix_sum(i - 1) }
+                                                        });
+                                                        let height = tree.with(|t| t.get(i));
+                                                        format!(
+                                                            "position: absolute; width: 100%; top: {top}px; height: {height}px; {inner_el_style}",
+                                                        )
+                                                    }
+                                                >
+                                                    {children((i, item))}
+                                                </div>
+                                            }
+                                            .into_any()
+                                        },
+                                    )
                                 })
                             }
                         />

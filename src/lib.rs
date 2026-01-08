@@ -1,3 +1,10 @@
+#![allow(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss
+)]
+
 extern crate alloc;
 
 pub mod blue_archive_generated;
@@ -13,5 +20,5 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(start)]
 pub fn run() {
     console_error_panic_hook::set_once();
-    mount_to_body(move || view! { <App /> })
+    mount_to_body(move || view! { <App /> });
 }

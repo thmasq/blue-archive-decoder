@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[component]
+#[must_use]
+#[allow(clippy::implicit_hasher)]
 pub fn SheetTabs(
     tables: Signal<HashMap<String, Arc<TableData>>>,
     selected: Signal<Option<String>>,

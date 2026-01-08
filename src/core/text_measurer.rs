@@ -18,13 +18,14 @@ fn get_fonts() -> &'static FontSet {
     FONTS.get_or_init(|| {
         let settings = FontSettings::default();
         FontSet {
-            en: Font::from_bytes(FONT_EN_BYTES, settings.clone()).unwrap(),
-            jp: Font::from_bytes(FONT_JP_BYTES, settings.clone()).unwrap(),
+            en: Font::from_bytes(FONT_EN_BYTES, settings).unwrap(),
+            jp: Font::from_bytes(FONT_JP_BYTES, settings).unwrap(),
             kr: Font::from_bytes(FONT_KR_BYTES, settings).unwrap(),
         }
     })
 }
 
+#[must_use]
 pub fn measure_text_height(text: &str, max_width: f32, font_size: f32) -> f32 {
     if text.is_empty() || max_width <= 0.5 {
         return 30.0;
@@ -51,6 +52,7 @@ pub fn measure_text_height(text: &str, max_width: f32, font_size: f32) -> f32 {
             }
 
             if chunk_width > max_width {
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
                 let chunk_lines = (chunk_width / max_width).ceil() as usize;
 
                 if chunk_lines > 0 {
@@ -70,7 +72,7 @@ pub fn measure_text_height(text: &str, max_width: f32, font_size: f32) -> f32 {
             current_line_width += chunk_width;
         }
 
-        if let BreakOpportunity::Mandatory = opportunity {
+        if opportunity == BreakOpportunity::Mandatory {
             let is_cr = text[..offset].ends_with('\r');
 
             if !is_cr && offset < text_len {
@@ -82,7 +84,8 @@ pub fn measure_text_height(text: &str, max_width: f32, font_size: f32) -> f32 {
         last_offset = offset;
     }
 
-    (lines as f32 * line_height) + vertical_padding
+    #[allow(clippy::cast_precision_loss)]
+    (lines as f32).mul_add(line_height, vertical_padding)
 }
 
 fn measure_chunk_width(text: &str, fonts: &FontSet, px: f32) -> f32 {
@@ -111,7 +114,7 @@ fn get_char_metrics(c: char, fonts: &FontSet, px: f32) -> (fontdue::Metrics, &Fo
         return (fonts.kr.metrics_indexed(idx.get(), px), &fonts.kr);
     }
 
-    let idx = fonts.en.chars().get(&'?').map(|nz| nz.get()).unwrap_or(0);
+    let idx = fonts.en.chars().get(&'?').map_or(0, |nz| nz.get());
 
     (fonts.en.metrics_indexed(idx, px), &fonts.en)
 }

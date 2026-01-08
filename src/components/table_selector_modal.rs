@@ -4,7 +4,9 @@ use leptos::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[must_use]
 #[component]
+#[allow(clippy::implicit_hasher)]
 pub fn TableSelectorModal(
     #[prop(into)] is_open: Signal<bool>,
     #[prop(into)] set_open: WriteSignal<bool>,
