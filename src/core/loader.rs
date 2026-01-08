@@ -1,6 +1,7 @@
 use super::TableData;
 use crate::db_migrator;
-use sqlite_wasm_reader::{Database, SelectQuery};
+use crate::utils::xxhash32;
+use sqlite_wasm_reader::{Database, SelectQuery, Value};
 use std::collections::HashMap;
 use std::io::Cursor;
 
@@ -67,9 +68,77 @@ pub fn load_tables(file_data: Vec<u8>) -> Result<HashMap<String, TableData>, Str
         }
     }
 
+    enrich_scenario_script(&mut tables);
+
     web_sys::console::log_1(
         &format!("Loader finished. Total loaded tables: {}", tables.len()).into(),
     );
 
     Ok(tables)
+}
+
+fn enrich_scenario_script(tables: &mut HashMap<String, TableData>) {
+    let name_table = match tables.get("ScenarioCharacterNameExcel") {
+        Some(t) => t,
+        None => return,
+    };
+
+    let id_col_idx = name_table
+        .columns
+        .iter()
+        .position(|c| c == "character_name");
+    let en_col_idx = name_table.columns.iter().position(|c| c == "name_en");
+
+    let mut name_map: HashMap<i64, String> = HashMap::new();
+
+    if let (Some(id_idx), Some(en_idx)) = (id_col_idx, en_col_idx) {
+        for row in &name_table.rows {
+            let id = match row.get(id_idx) {
+                Some(Value::Integer(val)) => *val,
+                Some(Value::Real(val)) => *val as i64,
+                _ => continue,
+            };
+
+            let name = match row.get(en_idx) {
+                Some(Value::Text(s)) => s.clone(),
+                _ => continue,
+            };
+
+            name_map.insert(id, name);
+        }
+    }
+
+    if let Some(script_table) = tables.get_mut("ScenarioScriptExcel") {
+        let script_col_idx = script_table
+            .columns
+            .iter()
+            .position(|c| c == "script_kr" || c == "Text" || c == "Script");
+
+        if let Some(col_idx) = script_col_idx {
+            script_table.columns.insert(0, "Speaker".to_string());
+
+            for row in &mut script_table.rows {
+                let mut decoded_name = Value::Null;
+
+                if let Some(Value::Text(script_text)) = row.get(col_idx) {
+                    let parts: Vec<&str> = script_text.split(';').collect();
+
+                    if parts.len() >= 2 && !script_text.trim().starts_with('#') {
+                        let name_part = parts[1];
+
+                        let hash_u32 = xxhash32(name_part.as_bytes(), 0);
+                        let hash_i64 = hash_u32 as i64;
+
+                        if let Some(en_name) = name_map.get(&hash_i64) {
+                            decoded_name = Value::Text(en_name.clone());
+                        } else {
+                            decoded_name = Value::Text(format!("{} (?)", name_part));
+                        }
+                    }
+                }
+
+                row.insert(0, decoded_name);
+            }
+        }
+    }
 }

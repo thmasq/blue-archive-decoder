@@ -52,7 +52,7 @@ pub fn xxhash32(data: &[u8], seed: u32) -> u32 {
 
     h32 = h32.wrapping_add(data_len);
 
-    while offset <= data.len() - 4 {
+    while offset + 4 <= data.len() {
         let val = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
         h32 = h32.wrapping_add(val.wrapping_mul(PRIME32_3));
         h32 = h32.rotate_left(17);
