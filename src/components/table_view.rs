@@ -244,7 +244,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                     MIN_COL_WIDTH
                 };
 
-                let usable_width = (col_w as f32 - 11.0).max(10.0);
+                let usable_width = (col_w as f32 - 14.0).max(10.0);
 
                 let height = measure_text_height(text, usable_width, FONT_SIZE);
                 if height > max_height {
