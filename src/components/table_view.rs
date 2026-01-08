@@ -7,6 +7,7 @@ use leptos::prelude::*;
 use leptos_use::{use_event_listener, use_resize_observer};
 use regex::Regex;
 use sqlite_wasm_reader::Value;
+use std::collections::HashSet;
 use std::hash::Hash;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
@@ -119,6 +120,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     let (display_widths, set_display_widths) = signal(vec![100.0; initial_col_count]);
     let (measured_widths, set_measured_widths) = signal(vec![100.0; initial_col_count]);
     let (manual_resize_triggered, set_manual_resize_triggered) = signal(false);
+    let (hidden_indices, set_hidden_indices) = signal(HashSet::<usize>::new());
 
     let default_row_height = 24;
 
@@ -233,10 +235,14 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
         let row = &data_for_height.rows[*row_idx];
 
         let widths = measured_widths.get();
+        let hidden = hidden_indices.get();
 
         let mut max_height = default_row_height as f32;
 
         for (col_idx, val) in row.iter().enumerate() {
+            if hidden.contains(&col_idx) {
+                continue;
+            }
             if let Value::Text(text) = val {
                 let col_w = if col_idx < widths.len() {
                     widths[col_idx]
@@ -257,9 +263,12 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
 
     let grid_template = move || {
         let widths = display_widths.get();
+        let hidden = hidden_indices.get();
         let cols_str = widths
             .iter()
-            .map(|w| format!("{}px", w))
+            .enumerate()
+            .filter(|(i, _)| !hidden.contains(i))
+            .map(|(_, w)| format!("{}px", w))
             .collect::<Vec<_>>()
             .join(" ");
         format!("46px {}", cols_str)
@@ -284,6 +293,25 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                 <div style="font-size: 0.8rem; color: #5f6368; user-select: none;">
                     {move || format!("{} records", filtered_rows.get().len())}
                 </div>
+                <div style="margin-left: 10px;">
+                    {move || {
+                        if !hidden_indices.get().is_empty() {
+                            view! {
+                                <button
+                                    on:click=move |_| {
+                                        set_hidden_indices.set(HashSet::new());
+                                        set_resize_trigger.update(|n| *n += 1);
+                                    }
+                                    style="border: 1px solid #dadce0; background: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 0.75rem; color: #5f6368;"
+                                >
+                                    "Reset Columns"
+                                </button>
+                            }.into_any()
+                        } else {
+                            view! {}.into_any()
+                        }
+                    }}
+                </div>
             </div>
 
             <div
@@ -292,12 +320,33 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
             >
                 <div style="border-right: 1px solid #c0c0c0; background: #f8f9fa;"></div>
 
-                {
-                    data.columns.iter().enumerate().map(|(i, col)| view! {
-                        <div style="position: relative; padding: 4px 6px; border-right: 1px solid #c0c0c0; color: #5f6368; font-weight: 700; font-size: 11px; display: flex; align-items: center; justify-content: center; height: 24px;">
-                            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; text-align: center;">
+                {move || {
+                    let hidden = hidden_indices.get();
+                    data.columns.iter().enumerate()
+                        .filter(|(i, _)| !hidden.contains(i))
+                        .map(|(i, col)| view! {
+                        <div style="position: relative; padding: 4px 6px; border-right: 1px solid #c0c0c0; color: #5f6368; font-weight: 700; font-size: 11px; display: flex; align-items: center; justify-content: space-between; height: 24px;">
+                            <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;">
                                 {col.clone()}
                             </span>
+                            <div
+                                style="cursor: pointer; color: #9aa0a6; font-size: 16px; margin-left: 4px; display: flex; align-items: center; justify-content: center; width: 16px; height: 16px;"
+                                on:click=move |_| {
+                                    set_hidden_indices.update(|set| { set.insert(i); });
+                                    set_resize_trigger.update(|n| *n += 1);
+                                }
+                                on:mouseover=move |ev: ev::MouseEvent| {
+                                     let target: leptos::web_sys::HtmlElement = event_target(&ev);
+                                     let _ = target.style().set_property("color", "#5f6368");
+                                }
+                                on:mouseout=move |ev: ev::MouseEvent| {
+                                     let target: leptos::web_sys::HtmlElement = event_target(&ev);
+                                     let _ = target.style().set_property("color", "#9aa0a6");
+                                }
+                                title="Hide column"
+                            >
+                                "×"
+                            </div>
                             <div
                                 style="position: absolute; right: 0; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 10;"
                                 on:mousedown=move |ev| {
@@ -321,7 +370,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                             ></div>
                         </div>
                     }).collect::<Vec<_>>()
-                }
+                }}
             </div>
 
             <div style="flex: 1; overflow-y: hidden; background: #fff;">
@@ -337,13 +386,14 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                             return view! { <div>"Error"</div> }.into_any();
                         }
                         let row: &Vec<Value> = &data_for_scroller.rows[*row_idx];
+                        let hidden = hidden_indices.get();
 
                         view! {
                             <div style=move || format!("display: grid; grid-template-columns: {}; height: 100%; align-items: start;", grid_template())>
                                 <div style="background: #f8f9fa; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #ccc; color: #5f6368; font-size: 11px; display: flex; align-items: center; justify-content: center; height: 100%; user-select: none;">
                                     {(*row_idx + 1).to_string()}
                                 </div>
-                                {row.iter().map(|val| {
+                                {row.iter().enumerate().filter(|(i, _)| !hidden.contains(i)).map(|(_, val)| {
                                     let (txt, color, align) = match val {
                                         Value::Null => ("".to_string(), "#ccc", "left"),
                                         Value::Integer(i) => (i.to_string(), "#1155cc", "right"),
