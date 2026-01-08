@@ -1,5 +1,5 @@
-use crate::core::TableData;
 use crate::core::text_measurer::measure_text_height;
+use crate::core::{FONT_SIZE, TableData};
 use leptos::ev;
 use leptos::html::Div;
 use leptos::prelude::window;
@@ -121,7 +121,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     let (manual_resize_triggered, set_manual_resize_triggered) = signal(false);
 
     let default_row_height = 24;
-    let (computed_font_size, set_computed_font_size) = signal(13.0f32);
+
     let header_ref = NodeRef::<Div>::new();
     let scroll_view_ref = NodeRef::<Div>::new();
     let (scrollbar_width, set_scrollbar_width) = signal(12.0);
@@ -203,26 +203,6 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
         }
     });
 
-    Effect::new(move |_| {
-        if let Some(el) = header_ref.get() {
-            let window = leptos::web_sys::window().unwrap();
-            if let Ok(Some(style)) = window.get_computed_style(&el) {
-                let font_size_str = style
-                    .get_property_value("font-size")
-                    .unwrap_or("13px".into());
-                let size = font_size_str
-                    .trim_end_matches("px")
-                    .parse::<f32>()
-                    .unwrap_or(13.0);
-
-                if (size - computed_font_size.get_untracked()).abs() > 0.1 {
-                    set_computed_font_size.set(size);
-                    set_resize_trigger.update(|n| *n += 1);
-                }
-            }
-        }
-    });
-
     let filtered_rows = Memo::new(move |_| {
         let query = filter_query.get();
         let rows = &data_for_filter.rows;
@@ -253,7 +233,6 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
         let row = &data_for_height.rows[*row_idx];
 
         let widths = measured_widths.get();
-        let current_font_size = computed_font_size.get();
 
         let mut max_height = default_row_height as f32;
 
@@ -264,9 +243,10 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                 } else {
                     MIN_COL_WIDTH
                 };
-                let usable_width = (col_w as f32 - 8.0).max(10.0);
 
-                let height = measure_text_height(text, usable_width, current_font_size);
+                let usable_width = (col_w as f32 - 11.0).max(10.0);
+
+                let height = measure_text_height(text, usable_width, FONT_SIZE);
                 if height > max_height {
                     max_height = height;
                 }
@@ -298,7 +278,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                         placeholder="Search / Filter..."
                         prop:value=move || filter_query.get()
                         on:input=move |ev| set_filter_query.set(event_target_value(&ev))
-                        style="width: 100%; border: none; background: transparent; font-size: 13px; outline: none; padding: 4px;"
+                        style=format!("width: 100%; border: none; background: transparent; font-size: {}px; outline: none; padding: 4px;", FONT_SIZE)
                     />
                 </div>
                 <div style="font-size: 0.8rem; color: #5f6368; user-select: none;">
@@ -373,7 +353,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                                     };
 
                                     view! {
-                                        <div style=format!("padding: 2px 5px; border-right: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0; overflow: hidden; white-space: pre-wrap; word-wrap: break-word; line-height: 1.3; font-size: 13px; color: {}; text-align: {}; height: 100%;", color, align)
+                                        <div style=format!("box-sizing: border-box; padding: 4px 5px; border-right: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0; overflow: hidden; white-space: pre-wrap; word-wrap: break-word; line-height: 1.3; font-size: {}px; color: {}; text-align: {}; height: 100%;", FONT_SIZE, color, align)
                                             title=txt.clone()>
                                             {txt.clone()}
                                         </div>

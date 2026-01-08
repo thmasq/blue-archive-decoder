@@ -32,8 +32,8 @@ pub fn measure_text_height(text: &str, max_width: f32, font_size: f32) -> f32 {
 
     let fonts = get_fonts();
 
-    let line_height = font_size * 1.25;
-    let vertical_padding = 12.0;
+    let line_height = font_size * 1.3;
+    let vertical_padding = 9.0;
 
     let mut lines = 1;
     let mut current_line_width = 0.0;
