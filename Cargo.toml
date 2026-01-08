@@ -2,6 +2,10 @@
 name = "blue-archive-decoder"
 version = "0.1.0"
 edition = "2024"
+authors = ["Thomas Q <thomasqsa@gmail.com>"]
+description = "Webapp for decoding Blue Archive's database file"
+license = "AGPL-3.0-only"
+repository = "https://github.com/thmasq/blue-archive-decoder"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
