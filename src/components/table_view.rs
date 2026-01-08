@@ -1,5 +1,6 @@
 use crate::core::text_measurer::measure_text_height;
 use crate::core::{FONT_SIZE, TableData};
+use csv::WriterBuilder;
 use leptos::ev;
 use leptos::html::Div;
 use leptos::prelude::window;
@@ -11,6 +12,7 @@ use std::collections::HashSet;
 use std::hash::Hash;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
+use web_sys::{Blob, BlobPropertyBag, Url, js_sys};
 
 const MIN_COL_WIDTH: f64 = 50.0;
 
@@ -114,6 +116,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     let data_for_filter = data.clone();
     let data_for_scroller = data.clone();
     let data_for_height = data.clone();
+    let data_for_export = data.clone();
 
     let initial_col_count = data.columns.len().max(1);
 
@@ -228,6 +231,87 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
         }
     });
 
+    let export_csv = move |_| {
+        let data = data_for_export.clone();
+        let rows_indices = filtered_rows.get();
+        let hidden = hidden_indices.get();
+
+        let mut wtr = WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(Vec::new());
+
+        let headers: Vec<String> = data
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !hidden.contains(i))
+            .map(|(_, col)| col.clone())
+            .collect();
+
+        if let Err(e) = wtr.write_record(&headers) {
+            web_sys::console::error_1(&format!("Failed to write headers: {}", e).into());
+            return;
+        }
+
+        for row_idx in rows_indices {
+            if row_idx >= data.rows.len() {
+                continue;
+            }
+            let row = &data.rows[row_idx];
+            let row_strings: Vec<String> = row
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !hidden.contains(i))
+                .map(|(_, val)| match val {
+                    Value::Text(t) => t.clone(),
+                    Value::Integer(n) => n.to_string(),
+                    Value::Real(f) => f.to_string(),
+                    Value::Null => "".to_string(),
+                    Value::Blob(b) => format!("<Blob {}b>", b.len()),
+                })
+                .collect();
+
+            if let Err(e) = wtr.write_record(&row_strings) {
+                web_sys::console::error_1(&format!("Failed to write row: {}", e).into());
+                return;
+            }
+        }
+
+        match wtr.into_inner() {
+            Ok(bytes) => {
+                let uint8_array = js_sys::Uint8Array::from(&bytes[..]);
+                let array = js_sys::Array::new();
+                array.push(&uint8_array);
+
+                let blob_options = BlobPropertyBag::new();
+                blob_options.set_type("text/csv;charset=utf-8;");
+
+                match Blob::new_with_u8_array_sequence_and_options(&array, &blob_options) {
+                    Ok(blob) => {
+                        if let Ok(url) = Url::create_object_url_with_blob(&blob) {
+                            let document = leptos::prelude::document();
+                            if let Ok(link) = document.create_element("a") {
+                                let _ = link.set_attribute("href", &url);
+                                let _ = link.set_attribute("download", "export.csv");
+                                let _ = link.set_attribute("style", "display: none");
+
+                                if let Some(body) = document.body() {
+                                    let _ = body.append_child(&link);
+                                    let html_link = link.unchecked_into::<web_sys::HtmlElement>();
+                                    html_link.click();
+                                    let _ = body.remove_child(&html_link);
+                                }
+                                let _ = Url::revoke_object_url(&url);
+                            }
+                        }
+                    }
+                    Err(e) => web_sys::console::error_1(&e),
+                }
+            }
+            Err(e) => web_sys::console::error_1(&format!("Failed to flush CSV: {}", e).into()),
+        }
+    };
+
     let item_height_calc = move |_idx: usize, row_idx: &usize| -> usize {
         if *row_idx >= data_for_height.rows.len() {
             return default_row_height;
@@ -293,7 +377,13 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                 <div style="font-size: 0.8rem; color: #5f6368; user-select: none;">
                     {move || format!("{} records", filtered_rows.get().len())}
                 </div>
-                <div style="margin-left: 10px;">
+                <div style="margin-left: 10px; display: flex; gap: 8px;">
+                    <button
+                        on:click=export_csv
+                        style="border: 1px solid #dadce0; background: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 0.75rem; color: #5f6368;"
+                    >
+                        "Export CSV"
+                    </button>
                     {move || {
                         if !hidden_indices.get().is_empty() {
                             view! {
