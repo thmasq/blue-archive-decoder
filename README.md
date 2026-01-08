@@ -4,8 +4,8 @@ A web application for decoding Blue Archive's database files, built with Rust, L
 
 ## Prerequisites
 
-* **Rust** (latest stable)
-* **wasm-pack**: `cargo install wasm-pack`
+- **Rust** (latest stable)
+- **wasm-pack**: `cargo install wasm-pack`
 
 ## Building
 
