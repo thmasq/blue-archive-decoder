@@ -2,10 +2,8 @@
 
 use crate::blue_archive_generated::global::{
     AcademyMessangerExcel, CharacterDialogEmojiExcel, CharacterDialogEventExcel,
-    CharacterDialogExcel, CharacterDialogSubtitleExcel, CharacterVoiceExcel,
-    CharacterVoiceSubtitleExcel, LocalizeErrorExcel, LocalizeEtcExcel, LocalizeExcel,
-    LocalizeSkillExcel, MemoryLobby_GlobalExcel, MemoryLobbyExcel, MessagePopupExcel,
-    MissionEmergencyCompleteExcel, ScenarioBGName_GlobalExcel, ScenarioBGNameExcel,
+    CharacterDialogExcel, CharacterDialogSubtitleExcel, CharacterVoiceSubtitleExcel,
+    LocalizeErrorExcel, LocalizeEtcExcel, LocalizeExcel, LocalizeSkillExcel,
     ScenarioCharacterEmotionExcel, ScenarioCharacterNameExcel, ScenarioScriptExcel,
     TutorialCharacterDialogExcel,
 };
