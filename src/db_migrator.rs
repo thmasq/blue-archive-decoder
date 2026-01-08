@@ -1,29 +1,13 @@
 #![allow(clippy::items_after_statements)]
 
 use crate::blue_archive_generated::global::{
-    CharacterDialogEmojiExcel, CharacterDialogEventExcel, CharacterDialogExcel,
-    CharacterDialogSubtitleExcel, CharacterGearExcel, CharacterGearLevelExcel,
-    CharacterPotentialExcel, CharacterPotentialRewardExcel, CharacterPotentialStatExcel,
-    CharacterVoiceExcel, CharacterVoiceSubtitleExcel, CombatEmojiExcel,
-    ContentEnterCostReduceExcel, ContentSpoilerPopupExcel, ContentsScenarioExcel,
-    ContentsShortcutExcel, CurrencyExcel, EventContentNotifyExcel, EventContentSpoilerPopupExcel,
-    EventContentTreasureCellRewardExcel, EventContentTreasureExcel,
-    EventContentTreasureRewardExcel, EventContentTreasureRoundExcel,
-    FarmingDungeonLocationManageExcel, FavorLevelExcel, FavorLevelRewardExcel,
-    FixedEchelonSettingExcel, FormationLocationExcel, GroundModuleRewardExcel,
-    IdCardBackgroundExcel, InformationExcel, LoadingImageExcel, LocalizeErrorExcel,
-    LocalizeEtcExcel, LocalizeExcel, LocalizeSkillExcel, MemoryLobby_GlobalExcel, MemoryLobbyExcel,
-    MessagePopupExcel, MissionEmergencyCompleteExcel, ScenarioBGName_GlobalExcel,
-    ScenarioBGNameExcel, ScenarioCharacterEmotionExcel, ScenarioCharacterNameExcel,
-    ScenarioCharacterSituationSetExcel, ScenarioContentCollectionExcel, ScenarioEffectExcel,
-    ScenarioModeExcel, ScenarioModeRewardExcel, ScenarioResourceInfoExcel, ScenarioScriptExcel,
-    ScenarioTransitionExcel, SchoolDungeonRewardExcel, SchoolDungeonStageExcel, ServiceActionExcel,
-    ShortcutTypeExcel, SkillAdditionalTooltipExcel, SoundUIExcel, SpineLipsyncExcel,
-    StageFileRefreshSettingExcel, StatLevelInterpolationExcel, StickerGroupExcel,
-    StickerPageContentExcel, StoryStrategyExcel, ToastExcel, TutorialCharacterDialogExcel,
-    TutorialExcel, TutorialFailureImageExcel, UnderCoverStageExcel, Video_GlobalExcel, VideoExcel,
-    VoiceCommonExcel, VoiceExcel, VoiceLogicEffectExcel, VoiceRoomExceptionExcel, VoiceSpineExcel,
-    VoiceTimelineExcel,
+    AcademyMessangerExcel, CharacterDialogEmojiExcel, CharacterDialogEventExcel,
+    CharacterDialogExcel, CharacterDialogSubtitleExcel, CharacterVoiceExcel,
+    CharacterVoiceSubtitleExcel, LocalizeErrorExcel, LocalizeEtcExcel, LocalizeExcel,
+    LocalizeSkillExcel, MemoryLobby_GlobalExcel, MemoryLobbyExcel, MessagePopupExcel,
+    MissionEmergencyCompleteExcel, ScenarioBGName_GlobalExcel, ScenarioBGNameExcel,
+    ScenarioCharacterEmotionExcel, ScenarioCharacterNameExcel, ScenarioScriptExcel,
+    TutorialCharacterDialogExcel,
 };
 use sqlite_wasm_reader::{Database, SelectQuery, Value};
 use std::collections::HashMap;
@@ -138,130 +122,18 @@ macro_rules! register_table {
 pub fn register_loaders<S: ::std::hash::BuildHasher>(
     registry: &mut HashMap<String, TableLoader, S>,
 ) {
-    // register_table!(registry, AccountLevel);
-    // register_table!(registry, AssistEchelonTypeConvert);
-    // register_table!(registry, Attendance);
-    // register_table!(registry, AttendanceReward);
-    // register_table!(registry, AudioAnimator);
-    // register_table!(registry, BGM);
-    // register_table!(registry, BGMRaid);
-    // register_table!(registry, BGMUI);
-    // register_table!(registry, BGM_Global);
-    // register_table!(registry, Camera);
+    register_table!(registry, AcademyMessanger);
     register_table!(registry, CharacterDialog);
     register_table!(registry, CharacterDialogEmoji);
     register_table!(registry, CharacterDialogEvent);
     register_table!(registry, CharacterDialogSubtitle);
-    register_table!(registry, CharacterGear);
-    register_table!(registry, CharacterGearLevel);
-    register_table!(registry, CharacterPotential);
-    register_table!(registry, CharacterPotentialReward);
-    register_table!(registry, CharacterPotentialStat);
-    register_table!(registry, CharacterVoice);
     register_table!(registry, CharacterVoiceSubtitle);
-    // register_table!(registry, ClanAssistSlot);
-    // register_table!(registry, ClanChattingEmoji);
-    // register_table!(registry, ClanReward);
-    register_table!(registry, CombatEmoji);
-    register_table!(registry, ContentEnterCostReduce);
-    register_table!(registry, ContentSpoilerPopup);
-    register_table!(registry, ContentsScenario);
-    register_table!(registry, ContentsShortcut);
-    register_table!(registry, Currency);
-    // register_table!(registry, Emblem);
-    register_table!(registry, EventContentNotify);
-    register_table!(registry, EventContentSpoilerPopup);
-    register_table!(registry, EventContentTreasureCellReward);
-    register_table!(registry, EventContentTreasure);
-    register_table!(registry, EventContentTreasureReward);
-    register_table!(registry, EventContentTreasureRound);
-    register_table!(registry, FarmingDungeonLocationManage);
-    register_table!(registry, FavorLevel);
-    register_table!(registry, FavorLevelReward);
-    register_table!(registry, FixedEchelonSetting);
-    register_table!(registry, FormationLocation);
-    // register_table!(registry, Ground);
-    register_table!(registry, GroundModuleReward);
-    register_table!(registry, IdCardBackground);
-    register_table!(registry, Information);
-    register_table!(registry, LoadingImage);
-    // register_table!(registry, LocalizeCharProfileChange);
     register_table!(registry, Localize);
     register_table!(registry, LocalizeError);
     register_table!(registry, LocalizeEtc);
     register_table!(registry, LocalizeSkill);
-    register_table!(registry, MemoryLobby);
-    register_table!(registry, MemoryLobby_Global);
-    register_table!(registry, MessagePopup);
-    // register_table!(registry, MiniGameDefenseCharacterBan);
-    // register_table!(registry, MiniGameDefenseFixedStat);
-    // register_table!(registry, MiniGameDefenseInfo);
-    // register_table!(registry, MiniGameDefenseStage);
-    // register_table!(registry, MiniGameDreamCollectionScenario);
-    // register_table!(registry, MiniGameDreamDailyPoint);
-    // register_table!(registry, MiniGameDreamEnding);
-    // register_table!(registry, MiniGameDreamEndingReward);
-    // register_table!(registry, MiniGameDreamInfo);
-    // register_table!(registry, MiniGameDreamParameter);
-    // register_table!(registry, MiniGameDreamReplayScenario);
-    // register_table!(registry, MiniGameDreamSchedule);
-    // register_table!(registry, MiniGameDreamScheduleResult);
-    // register_table!(registry, MiniGameDreamTimeline);
-    // register_table!(registry, MiniGameRoadPuzzleInfo);
-    // register_table!(registry, MiniGameRoadPuzzleRailSetReward);
-    // register_table!(registry, MiniGameRoadPuzzleReward);
-    // register_table!(registry, MiniGameRoadPuzzleVoice);
-    // register_table!(registry, MiniGameDreamVoice);
-    // register_table!(registry, MiniGameRoadPuzzleAdditionalReward);
-    // register_table!(registry, MiniGameRoadPuzzleMap);
-    // register_table!(registry, MiniGameRoadPuzzleMapTile);
-    // register_table!(registry, MiniGameRoadPuzzleRailTile);
-    // register_table!(registry, MiniGameRoadPuzzleRoadRound);
-    register_table!(registry, MissionEmergencyComplete);
-    // register_table!(registry, MultiFloorRaidReward);
-    // register_table!(registry, MultiFloorRaidSeasonManage);
-    // register_table!(registry, MultiFloorRaidStage);
-    // register_table!(registry, MultiFloorRaidStatChange);
-    // register_table!(registry, ObstacleStat);
-    // register_table!(registry, OpenCondition);
-    // register_table!(registry, Operator);
-    // register_table!(registry, ScenarioBGEffect);
-    register_table!(registry, ScenarioBGName);
-    register_table!(registry, ScenarioBGName_Global);
     register_table!(registry, ScenarioCharacterEmotion);
     register_table!(registry, ScenarioCharacterName);
-    register_table!(registry, ScenarioCharacterSituationSet);
-    register_table!(registry, ScenarioContentCollection);
-    register_table!(registry, ScenarioEffect);
-    register_table!(registry, ScenarioMode);
-    register_table!(registry, ScenarioModeReward);
-    register_table!(registry, ScenarioResourceInfo);
     register_table!(registry, ScenarioScript);
-    register_table!(registry, ScenarioTransition);
-    register_table!(registry, SchoolDungeonReward);
-    register_table!(registry, SchoolDungeonStage);
-    register_table!(registry, ServiceAction);
-    register_table!(registry, ShortcutType);
-    register_table!(registry, SkillAdditionalTooltip);
-    register_table!(registry, SoundUI);
-    register_table!(registry, SpineLipsync);
-    register_table!(registry, StageFileRefreshSetting);
-    register_table!(registry, StatLevelInterpolation);
-    register_table!(registry, StickerGroup);
-    register_table!(registry, StickerPageContent);
-    register_table!(registry, StoryStrategy);
-    register_table!(registry, Toast);
     register_table!(registry, TutorialCharacterDialog);
-    register_table!(registry, Tutorial);
-    register_table!(registry, TutorialFailureImage);
-    register_table!(registry, UnderCoverStage);
-    register_table!(registry, Video);
-    register_table!(registry, Video_Global);
-    register_table!(registry, VoiceCommon);
-    register_table!(registry, Voice);
-    register_table!(registry, VoiceLogicEffect);
-    register_table!(registry, VoiceRoomException);
-    register_table!(registry, VoiceSpine);
-    register_table!(registry, VoiceTimeline);
-    // register_table!(registry, WorldRaidCondition);
 }

@@ -36,16 +36,23 @@ pub fn load_tables(file_data: Vec<u8>) -> Result<HashMap<String, TableData>, Str
     web_sys::console::log_1(&format!("Registered {} custom loaders.", loaders.len()).into());
 
     for (name, loader) in loaders {
-        if let Ok((cols, rows)) = loader(&mut db) {
-            web_sys::console::log_1(&format!("Loaded custom table: {name}").into());
-            tables.insert(
-                name.clone(),
-                TableData {
-                    name,
-                    columns: cols,
-                    rows,
-                },
-            );
+        match loader(&mut db) {
+            Ok((cols, rows)) => {
+                web_sys::console::log_1(&format!("Loaded custom table: {name}").into());
+                tables.insert(
+                    name.clone(),
+                    TableData {
+                        name,
+                        columns: cols,
+                        rows,
+                    },
+                );
+            }
+            Err(e) => {
+                web_sys::console::error_1(
+                    &format!("Failed to load custom table '{}': {:?}", name, e).into(),
+                );
+            }
         }
     }
 
