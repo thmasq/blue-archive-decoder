@@ -4,6 +4,7 @@ pub mod blue_archive_generated;
 pub mod components;
 pub mod core;
 pub mod db_migrator;
+pub mod utils;
 
 use crate::components::app::App;
 use leptos::prelude::*;
