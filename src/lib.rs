@@ -12,6 +12,7 @@ pub mod components;
 pub mod core;
 pub mod db_migrator;
 pub mod utils;
+pub mod zip_reader;
 
 use crate::components::app::App;
 use leptos::prelude::*;

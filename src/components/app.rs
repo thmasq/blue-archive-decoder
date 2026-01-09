@@ -11,6 +11,7 @@ use super::sheet_tabs::SheetTabs;
 use super::table_selector_modal::TableSelectorModal;
 use super::table_view::TableView;
 use crate::core::{TableData, loader};
+use crate::zip_reader;
 
 #[component]
 #[must_use]
@@ -18,8 +19,11 @@ use crate::core::{TableData, loader};
 pub fn App() -> impl IntoView {
     let (tables, set_tables) = signal(HashMap::<String, Arc<TableData>>::new());
     let (selected_table_name, set_selected_table_name) = signal(Option::<String>::None);
-    let (is_loading, set_is_loading) = signal(false);
+    let (is_processing, set_is_processing) = signal(false);
     let (show_modal, set_show_modal) = signal(false);
+
+    let (db_loaded, set_db_loaded) = signal(false);
+    let (zip_loaded, set_zip_loaded) = signal(false);
 
     let current_table_data = move || {
         selected_table_name
@@ -47,12 +51,12 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    let on_file_change = move |ev: Event| {
+    let on_db_upload = move |ev: Event| {
         let input: HtmlInputElement = ev.target().unwrap().unchecked_into();
         if let Some(files) = input.files()
             && let Some(file) = files.get(0)
         {
-            set_is_loading.set(true);
+            set_is_processing.set(true);
             spawn_local(async move {
                 let promise = file.array_buffer();
                 let future = wasm_bindgen_futures::JsFuture::from(promise);
@@ -60,15 +64,55 @@ pub fn App() -> impl IntoView {
                     Ok(array_buffer) => {
                         let uint8_array = js_sys::Uint8Array::new(&array_buffer);
                         let vec = uint8_array.to_vec();
-                        if let Ok(loaded) = loader::load_tables(vec) {
-                            let rc_map: HashMap<_, _> =
-                                loaded.into_iter().map(|(k, v)| (k, Arc::new(v))).collect();
-                            set_tables.set(rc_map);
+
+                        match loader::load_tables(vec) {
+                            Ok(loaded) => {
+                                set_tables.update(|current| {
+                                    for (k, v) in loaded {
+                                        current.insert(k, Arc::new(v));
+                                    }
+                                });
+                                set_db_loaded.set(true);
+                            }
+                            Err(e) => web_sys::console::error_1(&e.into()),
                         }
                     }
                     Err(e) => web_sys::console::error_1(&e),
                 }
-                set_is_loading.set(false);
+                set_is_processing.set(false);
+            });
+        }
+    };
+
+    let on_zip_upload = move |ev: Event| {
+        let input: HtmlInputElement = ev.target().unwrap().unchecked_into();
+        if let Some(files) = input.files()
+            && let Some(file) = files.get(0)
+        {
+            set_is_processing.set(true);
+            spawn_local(async move {
+                let promise = file.array_buffer();
+                let future = wasm_bindgen_futures::JsFuture::from(promise);
+                match future.await {
+                    Ok(array_buffer) => {
+                        let uint8_array = js_sys::Uint8Array::new(&array_buffer);
+                        let vec = uint8_array.to_vec();
+
+                        match zip_reader::load_zip_tables(vec) {
+                            Ok(loaded) => {
+                                set_tables.update(|current| {
+                                    for (k, v) in loaded {
+                                        current.insert(k, Arc::new(v));
+                                    }
+                                });
+                                set_zip_loaded.set(true);
+                            }
+                            Err(e) => web_sys::console::error_1(&e.into()),
+                        }
+                    }
+                    Err(e) => web_sys::console::error_1(&e),
+                }
+                set_is_processing.set(false);
             });
         }
     };
@@ -85,15 +129,23 @@ pub fn App() -> impl IntoView {
                     </h3>
                 </div>
 
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    {move || if is_loading.get() {
+                <div style="display: flex; align-items: center; gap: 16px;">
+                    {move || if is_processing.get() {
                         view! { <span style="font-size: 0.85rem; color: #666;">"Processing..."</span> }.into_any()
                     } else {
                         ().into_any()
                     }}
-                    <label style="cursor: pointer; background: #f1f3f4; padding: 6px 12px; border-radius: 4px; font-size: 0.85rem; font-weight: 500; color: #333; transition: background 0.2s;">
-                        "Open File"
-                        <input type="file" on:change=on_file_change accept=".db,.bytes" style="display: none;" />
+
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; background: #f1f3f4; padding: 6px 12px; border-radius: 4px; border: 1px solid transparent; transition: background 0.2s;">
+                        <span style=move || format!("width: 8px; height: 8px; border-radius: 50%; background: {};", if db_loaded.get() { "#0f9d58" } else { "#db4437" })></span>
+                        <span style="font-size: 0.85rem; font-weight: 500; color: #333;">"ExcelDB.db"</span>
+                        <input type="file" on:change=on_db_upload accept=".db,.bytes" style="display: none;" />
+                    </label>
+
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; background: #f1f3f4; padding: 6px 12px; border-radius: 4px; border: 1px solid transparent; transition: background 0.2s;">
+                        <span style=move || format!("width: 8px; height: 8px; border-radius: 50%; background: {};", if zip_loaded.get() { "#0f9d58" } else { "#db4437" })></span>
+                        <span style="font-size: 0.85rem; font-weight: 500; color: #333;">"Excel.zip"</span>
+                        <input type="file" on:change=on_zip_upload accept=".zip" style="display: none;" />
                     </label>
                 </div>
             </div>
@@ -103,7 +155,7 @@ pub fn App() -> impl IntoView {
                          <div style="display: flex; justify-content: center; align-items: center; height: 100%; color: #888;">
                              <div style="text-align: center;">
                                  <p style="font-size: 1.5rem; margin-bottom: 10px;">"No Table Selected"</p>
-                                 <p>"Upload a file and select a table from the tabs below."</p>
+                                 <p>"Please upload ExcelDB.db and Excel.zip"</p>
                              </div>
                          </div>
                      }.into_any(), |data| view! { <TableView data=data /> }.into_any())}
