@@ -2,6 +2,7 @@ use leptos::ev;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_use::use_event_listener;
+use sqlite_wasm_reader::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
@@ -71,6 +72,9 @@ pub fn App() -> impl IntoView {
                                     for (k, v) in loaded {
                                         current.insert(k, Arc::new(v));
                                     }
+                                    if zip_loaded.get_untracked() {
+                                        enrich_academy_messenger(current);
+                                    }
                                 });
                                 set_db_loaded.set(true);
                             }
@@ -103,6 +107,9 @@ pub fn App() -> impl IntoView {
                                 set_tables.update(|current| {
                                     for (k, v) in loaded {
                                         current.insert(k, Arc::new(v));
+                                    }
+                                    if db_loaded.get_untracked() {
+                                        enrich_academy_messenger(current);
                                     }
                                 });
                                 set_zip_loaded.set(true);
@@ -178,5 +185,68 @@ pub fn App() -> impl IntoView {
                 }
             />
         </div>
+    }
+}
+
+fn enrich_academy_messenger(tables: &mut HashMap<String, Arc<TableData>>) {
+    let messenger_key = "AcademyMessangerExcel";
+    let profile_key = "LocalizeCharProfileExcel";
+
+    if !tables.contains_key(messenger_key) || !tables.contains_key(profile_key) {
+        return;
+    }
+
+    let mut id_to_name = HashMap::new();
+    {
+        if let Some(profile) = tables.get(profile_key) {
+            let p_cols = &profile.columns;
+            if let (Some(id_idx), Some(name_idx)) = (
+                p_cols.iter().position(|c| c == "character_id"),
+                p_cols.iter().position(|c| c == "full_name_en"),
+            ) {
+                for row in &profile.rows {
+                    let id = match row.get(id_idx) {
+                        Some(Value::Integer(v)) => *v,
+                        Some(Value::Real(v)) => *v as i64,
+                        _ => continue,
+                    };
+                    let name = match row.get(name_idx) {
+                        Some(Value::Text(s)) => s.clone(),
+                        _ => continue,
+                    };
+                    id_to_name.insert(id, name);
+                }
+            }
+        }
+    }
+
+    if id_to_name.is_empty() {
+        return;
+    }
+
+    if let Some(messenger_arc) = tables.get_mut(messenger_key) {
+        let messenger = Arc::make_mut(messenger_arc);
+
+        if messenger.columns.first().map(String::as_str) == Some("full_name_en") {
+            return;
+        }
+
+        if let Some(id_idx) = messenger.columns.iter().position(|c| c == "character_id") {
+            messenger.columns.insert(0, "full_name_en".to_string());
+
+            for row in &mut messenger.rows {
+                let id = match row.get(id_idx) {
+                    Some(Value::Integer(v)) => *v,
+                    Some(Value::Real(v)) => *v as i64,
+                    _ => -1,
+                };
+
+                let name = id_to_name
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_else(|| "???".to_string());
+                row.insert(0, Value::Text(name));
+            }
+        }
     }
 }
