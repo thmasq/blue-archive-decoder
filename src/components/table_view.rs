@@ -7,13 +7,12 @@ use leptos::html::Div;
 use leptos::prelude::window;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use leptos_use::{use_debounce_fn, use_event_listener, use_resize_observer};
+use leptos_use::{use_event_listener, use_resize_observer};
 use sqlite_wasm_reader::Value;
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::JsFuture;
 use web_sys::{Blob, BlobPropertyBag, Url, js_sys};
 
 const MIN_COL_WIDTH: f64 = 50.0;
@@ -118,18 +117,8 @@ struct ResizeState {
 #[component]
 #[allow(clippy::too_many_lines)]
 pub fn TableView(data: Arc<TableData>) -> impl IntoView {
-    // Raw input state
     let (filter_query, set_filter_query) = signal(String::new());
-    // Debounced state for the actual expensive search
-    let (debounced_query, set_debounced_query) = signal(String::new());
-
-    // Debounce the input: wait 300ms after the last keystroke before updating the search
-    let trigger_search = use_debounce_fn(
-        move || {
-            set_debounced_query.set(filter_query.get_untracked());
-        },
-        300.0,
-    );
+    let (committed_query, set_committed_query) = signal(String::new());
 
     let data_for_parse = data.clone();
     let data_for_filter = data.clone();
@@ -227,9 +216,8 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
         }
     });
 
-    // 1. Parse and Optimize the Query once
     let parsed_search = Memo::new(move |_| {
-        let query = debounced_query.get();
+        let query = committed_query.get();
         if query.trim().is_empty() {
             return Ok(None);
         }
@@ -267,21 +255,10 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                 Ok(None) => (0..total_rows).collect::<Vec<_>>(),
                 Ok(Some(ast)) => {
                     let mut results = Vec::new();
-                    let chunk_size = 2000;
 
                     for (i, row) in data.rows.iter().enumerate() {
                         if search_gen.get_untracked() != current_gen {
                             return;
-                        }
-
-                        if i > 0 && i % chunk_size == 0 {
-                            let promise = js_sys::Promise::new(&mut |resolve, _| {
-                                let _ = window()
-                                    .set_timeout_with_callback_and_timeout_and_arguments_0(
-                                        &resolve, 0,
-                                    );
-                            });
-                            let _ = JsFuture::from(promise).await;
                         }
 
                         let result = evaluator::evaluate(&ast, row, &data.columns, i);
@@ -448,7 +425,11 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                             prop:value=move || filter_query.get()
                             on:input=move |ev| {
                                 set_filter_query.set(event_target_value(&ev));
-                                trigger_search();
+                            }
+                            on:keydown=move |ev: ev::KeyboardEvent| {
+                                if ev.key() == "Enter" {
+                                    set_committed_query.set(filter_query.get_untracked());
+                                }
                             }
                             style=move || format!("width: 100%; border: none; background: transparent; font-size: {}px; outline: none; padding: 4px; border-bottom: {}px solid transparent;",
                                 FONT_SIZE,
