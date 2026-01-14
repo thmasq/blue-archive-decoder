@@ -11,6 +11,7 @@ description = "Webapp for decoding Blue Archive's database file"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+chrono = "0.4.42"
 chumsky = "0.12.0"
 console_error_panic_hook = "0.1.7"
 csv = "1.4.0"
