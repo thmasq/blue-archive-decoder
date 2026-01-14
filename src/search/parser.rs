@@ -37,8 +37,6 @@ where
             .separated_by(just(Token::Comma))
             .collect::<Vec<_>>()
             .delimited_by(just(Token::LParen), just(Token::RParen))
-            .or_not()
-            .map(|opt| opt.unwrap_or_default())
             .labelled("arguments");
 
         // --- Function Calls vs Columns ---

@@ -1,3 +1,24 @@
+use regex::Regex;
+use std::fmt;
+
+#[derive(Clone)]
+pub struct CompiledPattern {
+    pub re: Regex,
+    pub original: String,
+}
+
+impl PartialEq for CompiledPattern {
+    fn eq(&self, other: &Self) -> bool {
+        self.original == other.original
+    }
+}
+
+impl fmt::Debug for CompiledPattern {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Regex(\"{}\")", self.original)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOp {
     // Logic
@@ -39,6 +60,9 @@ pub enum Expr {
     // Operations
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Unary(UnaryOp, Box<Expr>),
+
+    // Optimization: Pre-compiled Regex
+    RegexMatch(Box<Expr>, CompiledPattern),
 
     // Functions: func_name, args
     Call(String, Vec<Expr>),

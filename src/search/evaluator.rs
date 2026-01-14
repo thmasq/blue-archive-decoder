@@ -1,10 +1,56 @@
-// src/search/evaluator.rs
-use crate::search::ast::{BinaryOp, Expr, UnaryOp};
+use crate::search::ast::{BinaryOp, CompiledPattern, Expr, UnaryOp};
 use chrono::NaiveDate;
 use sqlite_wasm_reader::Value;
 
 // We use a custom Result type to propagate "Type Errors" up to the UI.
 pub type EvalResult = Result<Value, String>;
+
+pub fn optimize(expr: Expr) -> Result<Expr, String> {
+    match expr {
+        Expr::Binary(lhs, op, rhs) => {
+            if op == BinaryOp::Regex {
+                if let Expr::String(ref pat) = *rhs {
+                    let re = regex::Regex::new(pat).map_err(|e| format!("Invalid Regex: {e}"))?;
+
+                    // Optimize the left side recursively
+                    let lhs_optimized = optimize(*lhs)?;
+
+                    return Ok(Expr::RegexMatch(
+                        Box::new(lhs_optimized),
+                        CompiledPattern {
+                            re,
+                            original: pat.clone(),
+                        },
+                    ));
+                }
+            }
+
+            // Standard recursion for other binary ops
+            Ok(Expr::Binary(
+                Box::new(optimize(*lhs)?),
+                op,
+                Box::new(optimize(*rhs)?),
+            ))
+        }
+        Expr::Unary(op, inner) => Ok(Expr::Unary(op, Box::new(optimize(*inner)?))),
+        Expr::Call(name, args) => {
+            let mut new_args = Vec::with_capacity(args.len());
+            for arg in args {
+                new_args.push(optimize(arg)?);
+            }
+            Ok(Expr::Call(name, new_args))
+        }
+        Expr::List(items) => {
+            let mut new_items = Vec::with_capacity(items.len());
+            for item in items {
+                new_items.push(optimize(item)?);
+            }
+            Ok(Expr::List(new_items))
+        }
+        // Base cases (Null, Literals, RowIndex, Column) remain unchanged
+        e => Ok(e),
+    }
+}
 
 /// Evaluates an expression against a specific row.
 ///
@@ -50,6 +96,20 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
                     Value::Real(f) => Ok(Value::Real(-f)),
                     _ => Err(format!("Cannot negate type {}", val_type(&val))),
                 },
+            }
+        }
+
+        Expr::RegexMatch(lhs, pat) => {
+            let val = evaluate(lhs, row, columns, row_index)?;
+
+            if let Value::Null = val {
+                return Ok(Value::Null);
+            }
+
+            if let Value::Text(t) = val {
+                Ok(Value::Integer(if pat.re.is_match(&t) { 1 } else { 0 }))
+            } else {
+                Err(format!("Regex requires (Text), found ({})", val_type(&val)))
             }
         }
 

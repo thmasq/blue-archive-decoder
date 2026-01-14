@@ -1,12 +1,12 @@
 use crate::core::text_measurer::measure_text_height;
 use crate::core::{FONT_SIZE, TableData};
+use crate::search::{evaluator, parser};
 use csv::WriterBuilder;
 use leptos::ev;
 use leptos::html::Div;
 use leptos::prelude::window;
 use leptos::prelude::*;
-use leptos_use::{use_event_listener, use_resize_observer};
-use regex::Regex;
+use leptos_use::{use_debounce_fn, use_event_listener, use_resize_observer};
 use sqlite_wasm_reader::Value;
 use std::collections::HashSet;
 use std::hash::Hash;
@@ -116,7 +116,18 @@ struct ResizeState {
 #[component]
 #[allow(clippy::too_many_lines)]
 pub fn TableView(data: Arc<TableData>) -> impl IntoView {
+    // Raw input state
     let (filter_query, set_filter_query) = signal(String::new());
+    // Debounced state for the actual expensive search
+    let (debounced_query, set_debounced_query) = signal(String::new());
+
+    // Debounce the input: wait 300ms after the last keystroke before updating the search
+    let trigger_search = use_debounce_fn(
+        move || {
+            set_debounced_query.set(filter_query.get_untracked());
+        },
+        300.0,
+    );
 
     let data_for_filter = data.clone();
     let data_for_scroller = data.clone();
@@ -213,25 +224,57 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
         }
     });
 
-    let filtered_rows = Memo::new(move |_| {
-        let query = filter_query.get();
-        let rows = &data_for_filter.rows;
-
-        if query.is_empty() {
-            return (0..rows.len()).collect::<Vec<_>>();
+    // 1. Parse and Optimize the Query once
+    let parsed_search = Memo::new(move |_| {
+        let query = debounced_query.get();
+        if query.trim().is_empty() {
+            return Ok(None);
         }
 
-        let re = Regex::new(&format!("(?i){query}"))
-            .ok()
-            .or_else(|| Regex::new(&regex::escape(&query)).ok());
+        // Parse
+        parser::parse(&query)
+            .and_then(|ast| evaluator::optimize(ast).map_err(|e| vec![e]))
+            .map(Some)
+    });
 
-        re.map_or_else(std::vec::Vec::new, |re| {
-            rows.iter()
+    let search_error = Signal::derive(move || {
+        parsed_search
+            .get()
+            .err()
+            .map(|e| e.join(", "))
+            .unwrap_or_default()
+    });
+
+    // 2. Filter rows using the AST
+    let filtered_rows = Memo::new(move |_| {
+        let rows = &data_for_filter.rows;
+        let columns = &data_for_filter.columns;
+
+        match parsed_search.get() {
+            Ok(None) => (0..rows.len()).collect::<Vec<_>>(), // Empty query -> All rows
+            Ok(Some(ast)) => rows
+                .iter()
                 .enumerate()
-                .filter(|(_, row)| row_matches(row, &re))
+                .filter(|(i, row)| {
+                    // Evaluate the row against the AST
+                    let result = evaluator::evaluate(&ast, row, columns, *i);
+
+                    if let Ok(ast) = &result {
+                        web_sys::console::log_1(&format!("Search AST: {:?}", ast).into());
+                    } else if let Err(e) = &result {
+                        web_sys::console::log_1(&format!("Search Error: {:?}", e).into());
+                    }
+
+                    // Check if truthy
+                    match result {
+                        Ok(val) => evaluator::is_truthy(&val),
+                        Err(_) => false, // Treat runtime errors as "no match"
+                    }
+                })
                 .map(|(i, _)| i)
-                .collect()
-        })
+                .collect(),
+            Err(_) => vec![], // Parse error -> Show no results (or all, depending on pref)
+        }
     });
 
     let export_csv = move |_| {
@@ -364,47 +407,68 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     view! {
         <div style="display: flex; flex-direction: column; height: 100%;">
 
-            <div style="background: #ffffff; border-bottom: 1px solid #dadce0; padding: 4px 8px; display: flex; align-items: center; gap: 8px; height: 32px; box-sizing: border-box;">
-                <div style="color: #9aa0a6; font-style: italic; font-weight: bold; font-family: serif; user-select: none;">
-                    "fx"
+            <div style="background: #ffffff; border-bottom: 1px solid #dadce0; padding: 4px 8px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box;">
+                <div style="display: flex; align-items: center; gap: 8px; height: 32px;">
+                    <div style="color: #9aa0a6; font-style: italic; font-weight: bold; font-family: serif; user-select: none;">
+                        "fx"
+                    </div>
+                    <div style="flex: 1; position: relative;">
+                         <input
+                            type="text"
+                            placeholder="Filter (e.g. name ~= 'Aris' and star_grade > 2)"
+                            prop:value=move || filter_query.get()
+                            on:input=move |ev| {
+                                set_filter_query.set(event_target_value(&ev));
+                                trigger_search();
+                            }
+                            style=move || format!("width: 100%; border: none; background: transparent; font-size: {}px; outline: none; padding: 4px; border-bottom: {}px solid transparent;",
+                                FONT_SIZE,
+                                if search_error.get().is_empty() { 0 } else { 2 }
+                            )
+                            class:error-input=move || !search_error.get().is_empty()
+                        />
+                    </div>
+                    <div style="font-size: 0.8rem; color: #5f6368; user-select: none;">
+                        {move || format!("{} records", filtered_rows.get().len())}
+                    </div>
+                    <div style="margin-left: 10px; display: flex; gap: 8px;">
+                        <button
+                            on:click=export_csv
+                            style="border: 1px solid #dadce0; background: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 0.75rem; color: #5f6368;"
+                        >
+                            "Export CSV"
+                        </button>
+                        {move || {
+                            if hidden_indices.get().is_empty() {
+                                ().into_any()
+                            } else {
+                                view! {
+                                    <button
+                                        on:click=move |_| {
+                                            set_hidden_indices.set(HashSet::new());
+                                            set_resize_trigger.update(|n| *n += 1);
+                                        }
+                                        style="border: 1px solid #dadce0; background: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 0.75rem; color: #5f6368;"
+                                    >
+                                        "Reset Columns"
+                                    </button>
+                                }.into_any()
+                            }
+                        }}
+                    </div>
                 </div>
-                <div style="flex: 1; position: relative;">
-                     <input
-                        type="text"
-                        placeholder="Search / Filter..."
-                        prop:value=move || filter_query.get()
-                        on:input=move |ev| set_filter_query.set(event_target_value(&ev))
-                        style=format!("width: 100%; border: none; background: transparent; font-size: {}px; outline: none; padding: 4px;", FONT_SIZE)
-                    />
-                </div>
-                <div style="font-size: 0.8rem; color: #5f6368; user-select: none;">
-                    {move || format!("{} records", filtered_rows.get().len())}
-                </div>
-                <div style="margin-left: 10px; display: flex; gap: 8px;">
-                    <button
-                        on:click=export_csv
-                        style="border: 1px solid #dadce0; background: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 0.75rem; color: #5f6368;"
-                    >
-                        "Export CSV"
-                    </button>
-                    {move || {
-                        if hidden_indices.get().is_empty() {
-                            ().into_any()
-                        } else {
-                            view! {
-                                <button
-                                    on:click=move |_| {
-                                        set_hidden_indices.set(HashSet::new());
-                                        set_resize_trigger.update(|n| *n += 1);
-                                    }
-                                    style="border: 1px solid #dadce0; background: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 0.75rem; color: #5f6368;"
-                                >
-                                    "Reset Columns"
-                                </button>
-                            }.into_any()
-                        }
-                    }}
-                </div>
+                {move || {
+                    let err = search_error.get();
+                    if err.is_empty() {
+                        ().into_any()
+                    } else {
+                        view! {
+                            <div style="color: #d93025; font-size: 0.75rem; margin-left: 24px;">
+                                {err}
+                            </div>
+                        }.into_any()
+                    }
+                }}
             </div>
 
             <div
@@ -509,17 +573,6 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
             </div>
         </div>
     }
-}
-
-fn row_matches(row: &[Value], re: &Regex) -> bool {
-    for val in row {
-        if let Value::Text(s) = val
-            && re.is_match(s)
-        {
-            return true;
-        }
-    }
-    false
 }
 
 #[component]
