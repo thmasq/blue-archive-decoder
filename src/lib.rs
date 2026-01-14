@@ -11,6 +11,7 @@ pub mod blue_archive_generated;
 pub mod components;
 pub mod core;
 pub mod db_migrator;
+pub mod search;
 pub mod utils;
 pub mod zip_reader;
 
