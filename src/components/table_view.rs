@@ -131,6 +131,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
         300.0,
     );
 
+    let data_for_parse = data.clone();
     let data_for_filter = data.clone();
     let data_for_scroller = data.clone();
     let data_for_height = data.clone();
@@ -233,10 +234,12 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
             return Ok(None);
         }
 
-        // Parse
-        parser::parse(&query)
+        let result = parser::parse(&query)
             .and_then(|ast| evaluator::optimize(ast).map_err(|e| vec![e]))
-            .map(Some)
+            .and_then(|ast| evaluator::bind(ast, &data_for_parse.columns).map_err(|e| vec![e]))
+            .map(Some);
+
+        result
     });
 
     let search_error = Signal::derive(move || {
@@ -264,7 +267,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                 Ok(None) => (0..total_rows).collect::<Vec<_>>(),
                 Ok(Some(ast)) => {
                     let mut results = Vec::new();
-                    let chunk_size = 500;
+                    let chunk_size = 2000;
 
                     for (i, row) in data.rows.iter().enumerate() {
                         if search_gen.get_untracked() != current_gen {

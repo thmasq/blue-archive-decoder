@@ -51,8 +51,9 @@ pub enum Expr {
     String(String),
 
     // References
-    RowIndex,       // @row
-    Column(String), // name, school_id
+    RowIndex, // @row
+    Column(String),
+    ColumnIndex(usize),
 
     // Structures
     List(Vec<Expr>), // ["A", "B"]

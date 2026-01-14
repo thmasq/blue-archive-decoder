@@ -52,6 +52,45 @@ pub fn optimize(expr: Expr) -> Result<Expr, String> {
     }
 }
 
+/// Resolves column names to indices relative to the provided schema.
+pub fn bind(expr: Expr, columns: &[String]) -> Result<Expr, String> {
+    match expr {
+        Expr::Column(name) => {
+            let idx = columns
+                .iter()
+                .position(|c| c.eq_ignore_ascii_case(&name))
+                .ok_or_else(|| format!("Column not found: '{name}'"))?;
+            Ok(Expr::ColumnIndex(idx))
+        }
+
+        Expr::Binary(lhs, op, rhs) => Ok(Expr::Binary(
+            Box::new(bind(*lhs, columns)?),
+            op,
+            Box::new(bind(*rhs, columns)?),
+        )),
+        Expr::Unary(op, inner) => Ok(Expr::Unary(op, Box::new(bind(*inner, columns)?))),
+        Expr::RegexMatch(lhs, pat) => Ok(Expr::RegexMatch(Box::new(bind(*lhs, columns)?), pat)),
+
+        Expr::Call(name, args) => {
+            let mut new_args = Vec::with_capacity(args.len());
+            for arg in args {
+                new_args.push(bind(arg, columns)?);
+            }
+            Ok(Expr::Call(name, new_args))
+        }
+
+        Expr::List(items) => {
+            let mut new_items = Vec::with_capacity(items.len());
+            for item in items {
+                new_items.push(bind(item, columns)?);
+            }
+            Ok(Expr::List(new_items))
+        }
+
+        e => Ok(e),
+    }
+}
+
 /// Evaluates an expression against a specific row.
 ///
 /// * `expr`: The AST node to evaluate.
@@ -71,6 +110,8 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
         Expr::List(_) => Err("Lists can only be used in 'in' checks".to_string()),
 
         Expr::RowIndex => Ok(Value::Integer(row_index as i64)),
+
+        Expr::ColumnIndex(idx) => Ok(row.get(*idx).cloned().unwrap_or(Value::Null)),
 
         Expr::Column(name) => {
             let idx = columns
