@@ -542,30 +542,35 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                         if *row_idx >= data_for_scroller.rows.len() {
                             return view! { <div>"Error"</div> }.into_any();
                         }
-                        let row: &Vec<Value> = &data_for_scroller.rows[*row_idx];
-                        let hidden = hidden_indices.get();
+                        let data_cells = data_for_scroller.clone();
+                        let current_row_idx = *row_idx;
 
                         view! {
                             <div style=move || format!("display: grid; grid-template-columns: {}; height: 100%; align-items: start;", grid_template())>
                                 <div style="background: #f8f9fa; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #ccc; color: #5f6368; font-size: 11px; display: flex; align-items: center; justify-content: center; height: 100%; user-select: none;">
                                     {(*row_idx + 1).to_string()}
                                 </div>
-                                {row.iter().enumerate().filter(|(i, _)| !hidden.contains(i)).map(|(_, val)| {
-                                    let (txt, color, align) = match val {
-                                        Value::Null => (String::new(), "#ccc", "left"),
-                                        Value::Integer(i) => (i.to_string(), "#1155cc", "right"),
-                                        Value::Real(f) => (f.to_string(), "#090", "right"),
-                                        Value::Text(s) => (s.clone(), "#000", "left"),
-                                        Value::Blob(b) => (format!("<Blob {}b>", b.len()), "#a0a", "center"),
-                                    };
+                                {move || {
+                                    let hidden = hidden_indices.get();
+                                    let row = &data_cells.rows[current_row_idx];
 
-                                    view! {
-                                        <div style=format!("box-sizing: border-box; padding: 4px 5px; border-right: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0; overflow: hidden; white-space: pre-wrap; word-wrap: break-word; line-height: 1.3; font-size: {}px; color: {}; text-align: {}; height: 100%;", FONT_SIZE, color, align)
-                                            title=txt>
-                                            {txt.clone()}
-                                        </div>
-                                    }
-                                }).collect::<Vec<_>>()}
+                                    row.iter().enumerate().filter(|(i, _)| !hidden.contains(i)).map(|(_, val)| {
+                                        let (txt, color, align) = match val {
+                                            Value::Null => (String::new(), "#ccc", "left"),
+                                            Value::Integer(i) => (i.to_string(), "#1155cc", "right"),
+                                            Value::Real(f) => (f.to_string(), "#090", "right"),
+                                            Value::Text(s) => (s.clone(), "#000", "left"),
+                                            Value::Blob(b) => (format!("<Blob {}b>", b.len()), "#a0a", "center"),
+                                        };
+
+                                        view! {
+                                            <div style=format!("box-sizing: border-box; padding: 4px 5px; border-right: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0; overflow: hidden; white-space: pre-wrap; word-wrap: break-word; line-height: 1.3; font-size: {}px; color: {}; text-align: {}; height: 100%;", FONT_SIZE, color, align)
+                                                title=txt>
+                                                {txt.clone()}
+                                            </div>
+                                        }
+                                    }).collect::<Vec<_>>()
+                                }}
                             </div>
                         }.into_any()
                     }
