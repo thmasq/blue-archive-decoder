@@ -19,9 +19,9 @@ pub fn SheetTabs(
     };
 
     view! {
-        <div style="height: 36px; background: #f1f3f4; border-top: 1px solid #dadce0; display: flex; align-items: flex-end; overflow-x: auto; padding-left: 40px; box-sizing: border-box; position: relative;">
+        <div style="background: #f1f3f4; border-top: 1px solid #dadce0; display: flex; flex-direction: row; width: 100%; min-height: 36px;">
             <div
-                style="position: absolute; left: 0; bottom: 0; height: 35px; width: 40px; display: flex; align-items: center; justify-content: center; background: #f1f3f4; border-right: 1px solid #dadce0; z-index: 10; cursor: pointer; transition: background 0.2s;"
+                style="width: 40px; display: flex; align-items: center; justify-content: center; background: #f1f3f4; border-right: 1px solid #dadce0; cursor: pointer; transition: background 0.2s; flex-shrink: 0; z-index: 2;"
                 on:click=move |_| on_add.run(())
                 title="Open Table Selector (Press 't')"
                 on:mouseover=move |ev: leptos::ev::MouseEvent| {
@@ -36,32 +36,34 @@ pub fn SheetTabs(
                 <span style="font-size: 1.4rem; color: #5f6368; line-height: 1;">"+"</span>
             </div>
 
-            <For
-                each=sorted_names
-                key=|name| name.clone()
-                children=move |name| {
-                    let is_selected = selected.get() == Some(name.clone());
-                    let n_clone = name.clone();
+            <div style="flex: 1; display: flex; align-items: flex-end; overflow-x: auto; box-sizing: border-box;">
+                <For
+                    each=sorted_names
+                    key=|name| name.clone()
+                    children=move |name| {
+                        let is_selected = selected.get() == Some(name.clone());
+                        let n_clone = name.clone();
 
-                    let (bg, color, font_weight, box_shadow) = if is_selected {
-                        ("#ffffff", "#0f9d58", "bold", "0 1px 3px rgba(0,0,0,0.1)")
-                    } else {
-                        ("transparent", "#5f6368", "normal", "none")
-                    };
+                        let (bg, color, font_weight, box_shadow) = if is_selected {
+                            ("#ffffff", "#0f9d58", "bold", "0 1px 3px rgba(0,0,0,0.1)")
+                        } else {
+                            ("transparent", "#5f6368", "normal", "none")
+                        };
 
-                    view! {
-                        <div
-                            on:click=move |_| on_select.set(Some(n_clone.clone()))
-                            style=format!(
-                                "padding: 6px 18px; cursor: pointer; background: {}; color: {}; font-weight: {}; font-size: 0.85rem; border-right: 1px solid #dadce0; border-top: 1px solid transparent; min-width: 60px; text-align: center; white-space: nowrap; user-select: none; box-shadow: {}; margin-bottom: 1px; height: 20px; flex-shrink: 0;",
-                                bg, color, font_weight, box_shadow
-                            )
-                        >
-                            {name}
-                        </div>
+                        view! {
+                            <div
+                                on:click=move |_| on_select.set(Some(n_clone.clone()))
+                                style=format!(
+                                    "padding: 6px 18px; cursor: pointer; background: {}; color: {}; font-weight: {}; font-size: 0.85rem; border-right: 1px solid #dadce0; border-top: 1px solid transparent; min-width: 60px; text-align: center; white-space: nowrap; user-select: none; box-shadow: {}; margin-bottom: 1px; height: 20px; flex-shrink: 0;",
+                                    bg, color, font_weight, box_shadow
+                                )
+                            >
+                                {name}
+                            </div>
+                        }
                     }
-                }
-            />
+                />
+            </div>
         </div>
     }
 }
