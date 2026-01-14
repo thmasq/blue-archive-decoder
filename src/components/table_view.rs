@@ -6,12 +6,14 @@ use leptos::ev;
 use leptos::html::Div;
 use leptos::prelude::window;
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use leptos_use::{use_debounce_fn, use_event_listener, use_resize_observer};
 use sqlite_wasm_reader::Value;
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::sync::Arc;
 use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
 use web_sys::{Blob, BlobPropertyBag, Url, js_sys};
 
 const MIN_COL_WIDTH: f64 = 50.0;
@@ -245,36 +247,60 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
             .unwrap_or_default()
     });
 
-    // 2. Filter rows using the AST
-    let filtered_rows = Memo::new(move |_| {
-        let rows = &data_for_filter.rows;
-        let columns = &data_for_filter.columns;
+    let (filtered_rows, set_filtered_rows) = signal((0..data.rows.len()).collect::<Vec<_>>());
+    let (search_gen, set_search_gen) = signal(0_usize);
 
-        match parsed_search.get() {
-            Ok(None) => (0..rows.len()).collect::<Vec<_>>(), // Empty query -> All rows
-            Ok(Some(ast)) => rows
-                .iter()
-                .enumerate()
-                .filter(|(i, row)| {
-                    // Evaluate the row against the AST
-                    let result = evaluator::evaluate(&ast, row, columns, *i);
+    Effect::new(move |_| {
+        let parse_result = parsed_search.get();
+        let data = data_for_filter.clone();
 
-                    if let Ok(ast) = &result {
-                        web_sys::console::log_1(&format!("Search AST: {:?}", ast).into());
-                    } else if let Err(e) = &result {
-                        web_sys::console::log_1(&format!("Search Error: {:?}", e).into());
+        set_search_gen.update(|n| *n += 1);
+        let current_gen = search_gen.get_untracked();
+
+        spawn_local(async move {
+            let total_rows = data.rows.len();
+
+            let result_indices = match parse_result {
+                Ok(None) => (0..total_rows).collect::<Vec<_>>(),
+                Ok(Some(ast)) => {
+                    let mut results = Vec::new();
+                    let chunk_size = 500;
+
+                    for (i, row) in data.rows.iter().enumerate() {
+                        if search_gen.get_untracked() != current_gen {
+                            return;
+                        }
+
+                        if i > 0 && i % chunk_size == 0 {
+                            let promise = js_sys::Promise::new(&mut |resolve, _| {
+                                let _ = window()
+                                    .set_timeout_with_callback_and_timeout_and_arguments_0(
+                                        &resolve, 0,
+                                    );
+                            });
+                            let _ = JsFuture::from(promise).await;
+                        }
+
+                        let result = evaluator::evaluate(&ast, row, &data.columns, i);
+
+                        let is_match = match result {
+                            Ok(val) => evaluator::is_truthy(&val),
+                            Err(_) => false,
+                        };
+
+                        if is_match {
+                            results.push(i);
+                        }
                     }
+                    results
+                }
+                Err(_) => vec![],
+            };
 
-                    // Check if truthy
-                    match result {
-                        Ok(val) => evaluator::is_truthy(&val),
-                        Err(_) => false, // Treat runtime errors as "no match"
-                    }
-                })
-                .map(|(i, _)| i)
-                .collect(),
-            Err(_) => vec![], // Parse error -> Show no results (or all, depending on pref)
-        }
+            if search_gen.get_untracked() == current_gen {
+                set_filtered_rows.set(result_indices);
+            }
+        });
     });
 
     let export_csv = move |_| {
