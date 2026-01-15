@@ -25,12 +25,12 @@ pub struct LexerExtras {
 #[logos(extras = LexerExtras)]
 pub enum Token {
     // --- Logic & Keywords ---
-    #[token("(?i)and")]
+    #[regex("(?i)and")]
     #[token("&&")]
     #[token("&")]
     And,
 
-    #[token("(?i)or")]
+    #[regex("(?i)or")]
     #[token("||")]
     #[token("|")]
     Or,
