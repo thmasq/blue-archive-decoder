@@ -153,7 +153,7 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
 
         // --- Binary Operations ---
         Expr::Binary(lhs, op, rhs) => {
-            // Short-circuiting logic
+            // Short-circuiting logic for AND / OR
             if matches!(op, BinaryOp::And | BinaryOp::Or) {
                 let left_val = evaluate(lhs, row, columns, row_index)?;
                 let left_truthy = is_truthy(&left_val);
@@ -169,6 +169,26 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
                 }
 
                 return evaluate(rhs, row, columns, row_index);
+            }
+
+            if let BinaryOp::In = op {
+                let l_val = evaluate(lhs, row, columns, row_index)?;
+
+                if let Value::Null = l_val {
+                    return Ok(Value::Null);
+                }
+
+                return if let Expr::List(items) = &**rhs {
+                    for item in items {
+                        let item_val = evaluate(item, row, columns, row_index)?;
+                        if values_equal(&l_val, &item_val) {
+                            return Ok(Value::Integer(1));
+                        }
+                    }
+                    Ok(Value::Integer(0))
+                } else {
+                    Err("Right side of 'in' must be a list [...]".to_string())
+                };
             }
 
             let l_val = evaluate(lhs, row, columns, row_index)?;
@@ -202,20 +222,6 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
                         val_type(&r_val)
                     )),
                 },
-
-                BinaryOp::In => {
-                    if let Expr::List(items) = &**rhs {
-                        for item in items {
-                            let item_val = evaluate(item, row, columns, row_index)?;
-                            if values_equal(&l_val, &item_val) {
-                                return Ok(Value::Integer(1));
-                            }
-                        }
-                        Ok(Value::Integer(0))
-                    } else {
-                        Err("Right side of 'in' must be a list [...]".to_string())
-                    }
-                }
 
                 BinaryOp::Gt | BinaryOp::Lt | BinaryOp::Gte | BinaryOp::Lte => {
                     compare_values(&l_val, &r_val, op)
