@@ -483,7 +483,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
 
             <div
                 node_ref=header_ref
-                style=move || format!("display: grid; grid-template-columns: {}; background: #f8f9fa; border-bottom: 1px solid #c0c0c0; padding-right: {}px; overflow-x: hidden; user-select: none;", grid_template(), scrollbar_width.get())
+                style=move || format!("display: grid; grid-template-columns: {}; background: #f8f9fa; border-bottom: 1px solid #c0c0c0; padding-right: {}px; overflow-x: hidden;", grid_template(), scrollbar_width.get())
             >
                 <div style="border-right: 1px solid #c0c0c0; background: #f8f9fa;"></div>
 
@@ -497,7 +497,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                                 {col.clone()}
                             </span>
                             <div
-                                style="cursor: pointer; color: #9aa0a6; font-size: 16px; margin-left: 4px; display: flex; align-items: center; justify-content: center; width: 16px; height: 16px;"
+                                style="cursor: pointer; color: #9aa0a6; font-size: 16px; margin-left: 4px; display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; user-select: none;"
                                 on:click=move |_| {
                                     set_hidden_indices.update(|set| { set.insert(i); });
                                     set_resize_trigger.update(|n| *n += 1);
@@ -541,7 +541,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
             </div>
 
             <div style="flex: 1; overflow-y: hidden; background: #fff;">
-                <VirtualScroller
+            <VirtualScroller
                     each=filtered_rows
                     key=move |(_, idx)| *idx
                     item_height=item_height_calc
@@ -556,8 +556,8 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                         let current_row_idx = *row_idx;
 
                         view! {
-                            <div style=move || format!("display: grid; grid-template-columns: {}; height: 100%; align-items: start;", grid_template())>
-                                <div style="background: #f8f9fa; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #ccc; color: #5f6368; font-size: 11px; display: flex; align-items: center; justify-content: center; height: 100%; user-select: none;">
+                            <div style=move || format!("display: grid; grid-template-columns: {}; height: 100%;", grid_template())>
+                                <div style="background: #f8f9fa; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #ccc; color: #5f6368; font-size: 11px; display: flex; align-items: center; justify-content: center;">
                                     {(*row_idx + 1).to_string()}
                                 </div>
                                 {move || {
@@ -574,7 +574,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                                         };
 
                                         view! {
-                                            <div style=format!("box-sizing: border-box; padding: 4px 5px; border-right: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0; overflow: hidden; white-space: pre-wrap; word-wrap: break-word; line-height: 1.3; font-size: {}px; color: {}; text-align: {}; height: 100%;", FONT_SIZE, color, align)
+                                            <div style=format!("box-sizing: border-box; padding: 4px 5px; border-right: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0; overflow: hidden; white-space: pre-wrap; word-wrap: break-word; line-height: 1.3; font-size: {}px; color: {}; text-align: {};", FONT_SIZE, color, align)
                                                 title=txt>
                                                 {txt.clone()}
                                             </div>
