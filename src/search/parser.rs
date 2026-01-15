@@ -1,4 +1,4 @@
-use crate::search::ast::{BinaryOp, Expr, UnaryOp};
+use crate::search::ast::{BinaryOp, Expr, FunctionId, UnaryOp};
 use crate::search::tokenizer::Token;
 use chumsky::input::{Input, ValueInput};
 use chumsky::prelude::*;
@@ -43,7 +43,7 @@ where
         let call_or_ref = select! { Token::Identifier(i) => i }
             .then(args.clone().or_not())
             .map(|(name, args)| match args {
-                Some(fn_args) => Expr::Call(name, fn_args),
+                Some(fn_args) => Expr::Call(FunctionId::Unknown(name), fn_args),
                 None => Expr::Column(name),
             });
 
@@ -65,7 +65,7 @@ where
             |lhs, (method_name, args), _span| {
                 let mut call_args = vec![lhs];
                 call_args.extend(args);
-                Expr::Call(method_name, call_args)
+                Expr::Call(FunctionId::Unknown(method_name), call_args)
             },
         );
 

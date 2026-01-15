@@ -1,21 +1,55 @@
-use crate::search::ast::{BinaryOp, CompiledPattern, Expr, UnaryOp};
+use crate::search::ast::{BinaryOp, CompiledPattern, Expr, FunctionId, UnaryOp};
 use chrono::NaiveDate;
 use sqlite_wasm_reader::Value;
+use std::collections::HashSet;
 
-// We use a custom Result type to propagate "Type Errors" up to the UI.
 pub type EvalResult = Result<Value, String>;
 
-pub fn optimize(expr: Expr) -> Result<Expr, String> {
+/// Resolves a string name to a specific FunctionId.
+fn resolve_function_id(id: &FunctionId) -> FunctionId {
+    if let FunctionId::Unknown(name) = id {
+        match name.to_lowercase().as_str() {
+            "int" => FunctionId::Int,
+            "float" => FunctionId::Float,
+            "str" | "string" => FunctionId::String,
+            "date" => FunctionId::Date,
+            "len" => FunctionId::Len,
+            "lower" => FunctionId::Lower,
+            "upper" => FunctionId::Upper,
+            "contains" => FunctionId::Contains,
+            "is_null" => FunctionId::IsNull,
+            _ => FunctionId::Unknown(name.clone()),
+        }
+    } else {
+        id.clone()
+    }
+}
+
+/// Checks if an expression is static (contains no column references or row indices).
+fn is_constant(expr: &Expr) -> bool {
     match expr {
+        Expr::Null | Expr::Bool(_) | Expr::Integer(_) | Expr::Float(_) | Expr::String(_) => true,
+        Expr::Column(_) | Expr::ColumnIndex(_) | Expr::RowIndex => false,
+        Expr::Binary(lhs, _, rhs) => is_constant(lhs) && is_constant(rhs),
+        Expr::Unary(_, inner) => is_constant(inner),
+        Expr::Call(_, args) => args.iter().all(is_constant),
+        Expr::List(items) => items.iter().all(is_constant),
+        Expr::RegexMatch(lhs, _) => is_constant(lhs),
+        Expr::SetMatch(lhs, _) => is_constant(lhs),
+    }
+}
+
+pub fn optimize(expr: Expr) -> Result<Expr, String> {
+    let mut expr = match expr {
         Expr::Binary(lhs, op, rhs) => {
+            let lhs_opt = optimize(*lhs)?;
+            let rhs_opt = optimize(*rhs)?;
+
             if op == BinaryOp::Regex {
-                if let Expr::String(ref pat) = *rhs {
+                if let Expr::String(ref pat) = rhs_opt {
                     let re = regex::Regex::new(pat).map_err(|e| format!("Invalid Regex: {e}"))?;
-
-                    let lhs_optimized = optimize(*lhs)?;
-
                     return Ok(Expr::RegexMatch(
-                        Box::new(lhs_optimized),
+                        Box::new(lhs_opt),
                         CompiledPattern {
                             re,
                             original: pat.clone(),
@@ -24,29 +58,80 @@ pub fn optimize(expr: Expr) -> Result<Expr, String> {
                 }
             }
 
-            Ok(Expr::Binary(
-                Box::new(optimize(*lhs)?),
-                op,
-                Box::new(optimize(*rhs)?),
-            ))
+            if op == BinaryOp::In {
+                if let Expr::List(items) = &rhs_opt {
+                    if items.iter().all(is_constant) {
+                        let mut set = HashSet::new();
+                        for item in items {
+                            if let Ok(val) = evaluate(item, &[], &[], 0) {
+                                let s = match val {
+                                    Value::Text(t) => t,
+                                    Value::Integer(i) => i.to_string(),
+                                    Value::Real(f) => f.to_string(),
+                                    Value::Blob(_) => "<Blob>".to_string(),
+                                    Value::Null => "null".to_string(),
+                                };
+                                set.insert(s);
+                            }
+                        }
+                        return Ok(Expr::SetMatch(Box::new(lhs_opt), set));
+                    }
+                }
+            }
+
+            match op {
+                BinaryOp::And => match (&lhs_opt, &rhs_opt) {
+                    (Expr::Bool(true), _) => return Ok(rhs_opt),
+                    (Expr::Bool(false), _) => return Ok(Expr::Bool(false)),
+                    (_, Expr::Bool(true)) => return Ok(lhs_opt),
+                    _ => {}
+                },
+                BinaryOp::Or => match (&lhs_opt, &rhs_opt) {
+                    (Expr::Bool(true), _) => return Ok(Expr::Bool(true)),
+                    (Expr::Bool(false), _) => return Ok(rhs_opt),
+                    _ => {}
+                },
+                _ => {}
+            }
+
+            Expr::Binary(Box::new(lhs_opt), op, Box::new(rhs_opt))
         }
-        Expr::Unary(op, inner) => Ok(Expr::Unary(op, Box::new(optimize(*inner)?))),
-        Expr::Call(name, args) => {
+
+        Expr::Unary(op, inner) => Expr::Unary(op, Box::new(optimize(*inner)?)),
+
+        Expr::Call(func_id, args) => {
+            let resolved_id = resolve_function_id(&func_id);
             let mut new_args = Vec::with_capacity(args.len());
             for arg in args {
                 new_args.push(optimize(arg)?);
             }
-            Ok(Expr::Call(name, new_args))
+            Expr::Call(resolved_id, new_args)
         }
+
         Expr::List(items) => {
             let mut new_items = Vec::with_capacity(items.len());
             for item in items {
                 new_items.push(optimize(item)?);
             }
-            Ok(Expr::List(new_items))
+            Expr::List(new_items)
         }
-        e => Ok(e),
+
+        e => e,
+    };
+
+    if is_constant(&expr) {
+        if let Ok(val) = evaluate(&expr, &[], &[], 0) {
+            expr = match val {
+                Value::Integer(i) => Expr::Integer(i),
+                Value::Real(f) => Expr::Float(f),
+                Value::Text(s) => Expr::String(s),
+                Value::Null => Expr::Null,
+                _ => expr,
+            };
+        }
     }
+
+    Ok(expr)
 }
 
 /// Resolves column names to indices relative to the provided schema.
@@ -67,13 +152,15 @@ pub fn bind(expr: Expr, columns: &[String]) -> Result<Expr, String> {
         )),
         Expr::Unary(op, inner) => Ok(Expr::Unary(op, Box::new(bind(*inner, columns)?))),
         Expr::RegexMatch(lhs, pat) => Ok(Expr::RegexMatch(Box::new(bind(*lhs, columns)?), pat)),
+        Expr::SetMatch(lhs, set) => Ok(Expr::SetMatch(Box::new(bind(*lhs, columns)?), set)),
 
-        Expr::Call(name, args) => {
+        Expr::Call(func_id, args) => {
+            let resolved_id = resolve_function_id(&func_id);
             let mut new_args = Vec::with_capacity(args.len());
             for arg in args {
                 new_args.push(bind(arg, columns)?);
             }
-            Ok(Expr::Call(name, new_args))
+            Ok(Expr::Call(resolved_id, new_args))
         }
 
         Expr::List(items) => {
@@ -149,6 +236,21 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
             } else {
                 Err(format!("Regex requires (Text), found ({})", val_type(&val)))
             }
+        }
+
+        Expr::SetMatch(lhs, set) => {
+            let val = evaluate(lhs, row, columns, row_index)?;
+            if let Value::Null = val {
+                return Ok(Value::Null);
+            }
+            let s = match val {
+                Value::Text(t) => t,
+                Value::Integer(i) => i.to_string(),
+                Value::Real(f) => f.to_string(),
+                Value::Blob(_) => "<Blob>".to_string(),
+                Value::Null => "null".to_string(),
+            };
+            Ok(Value::Integer(if set.contains(&s) { 1 } else { 0 }))
         }
 
         // --- Binary Operations ---
@@ -232,12 +334,12 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
         }
 
         // --- Function Calls ---
-        Expr::Call(name, args) => {
+        Expr::Call(func_id, args) => {
             let mut evaluated_args = Vec::with_capacity(args.len());
             for arg in args {
                 evaluated_args.push(evaluate(arg, row, columns, row_index)?);
             }
-            call_function(name, &evaluated_args)
+            call_function(func_id, &evaluated_args)
         }
     }
 }
@@ -317,11 +419,11 @@ fn apply_ord<T: PartialOrd>(l: &T, r: &T, op: &BinaryOp) -> bool {
 
 // --- Standard Library ---
 
-fn call_function(name: &str, args: &[Value]) -> EvalResult {
-    match name {
+fn call_function(func_id: &FunctionId, args: &[Value]) -> EvalResult {
+    match func_id {
         // int(val)
-        "int" => {
-            check_arg_count(name, args, 1)?;
+        FunctionId::Int => {
+            check_arg_count("int", args, 1)?;
             match &args[0] {
                 Value::Integer(i) => Ok(Value::Integer(*i)),
                 Value::Real(f) => Ok(Value::Integer(*f as i64)),
@@ -335,8 +437,8 @@ fn call_function(name: &str, args: &[Value]) -> EvalResult {
         }
 
         // float(val)
-        "float" => {
-            check_arg_count(name, args, 1)?;
+        FunctionId::Float => {
+            check_arg_count("float", args, 1)?;
             match &args[0] {
                 Value::Real(f) => Ok(Value::Real(*f)),
                 Value::Integer(i) => Ok(Value::Real(*i as f64)),
@@ -350,8 +452,8 @@ fn call_function(name: &str, args: &[Value]) -> EvalResult {
         }
 
         // str(val)
-        "str" | "string" => {
-            check_arg_count(name, args, 1)?;
+        FunctionId::String => {
+            check_arg_count("str", args, 1)?;
             match &args[0] {
                 Value::Text(s) => Ok(Value::Text(s.clone())),
                 Value::Integer(i) => Ok(Value::Text(i.to_string())),
@@ -362,8 +464,8 @@ fn call_function(name: &str, args: &[Value]) -> EvalResult {
         }
 
         // date(val) -> timestamp
-        "date" => {
-            check_arg_count(name, args, 1)?;
+        FunctionId::Date => {
+            check_arg_count("date", args, 1)?;
             match &args[0] {
                 Value::Text(s) => {
                     // Uses Chrono for parsing
@@ -385,8 +487,8 @@ fn call_function(name: &str, args: &[Value]) -> EvalResult {
         }
 
         // len(val)
-        "len" => {
-            check_arg_count(name, args, 1)?;
+        FunctionId::Len => {
+            check_arg_count("len", args, 1)?;
             match &args[0] {
                 Value::Text(s) => Ok(Value::Integer(s.len() as i64)),
                 Value::Blob(b) => Ok(Value::Integer(b.len() as i64)),
@@ -396,8 +498,8 @@ fn call_function(name: &str, args: &[Value]) -> EvalResult {
         }
 
         // lower(val)
-        "lower" => {
-            check_arg_count(name, args, 1)?;
+        FunctionId::Lower => {
+            check_arg_count("lower", args, 1)?;
             match &args[0] {
                 Value::Text(s) => Ok(Value::Text(s.to_lowercase())),
                 Value::Null => Ok(Value::Null),
@@ -406,8 +508,8 @@ fn call_function(name: &str, args: &[Value]) -> EvalResult {
         }
 
         // upper(val)
-        "upper" => {
-            check_arg_count(name, args, 1)?;
+        FunctionId::Upper => {
+            check_arg_count("upper", args, 1)?;
             match &args[0] {
                 Value::Text(s) => Ok(Value::Text(s.to_uppercase())),
                 Value::Null => Ok(Value::Null),
@@ -416,8 +518,8 @@ fn call_function(name: &str, args: &[Value]) -> EvalResult {
         }
 
         // contains(haystack, needle)
-        "contains" => {
-            check_arg_count(name, args, 2)?;
+        FunctionId::Contains => {
+            check_arg_count("contains", args, 2)?;
             match (&args[0], &args[1]) {
                 (Value::Text(h), Value::Text(n)) => {
                     Ok(Value::Integer(if h.contains(n) { 1 } else { 0 }))
@@ -432,8 +534,8 @@ fn call_function(name: &str, args: &[Value]) -> EvalResult {
         }
 
         // is_null(val)
-        "is_null" => {
-            check_arg_count(name, args, 1)?;
+        FunctionId::IsNull => {
+            check_arg_count("is_null", args, 1)?;
             Ok(Value::Integer(if matches!(args[0], Value::Null) {
                 1
             } else {
@@ -441,7 +543,7 @@ fn call_function(name: &str, args: &[Value]) -> EvalResult {
             }))
         }
 
-        _ => Err(format!("Unknown function: '{name}'")),
+        FunctionId::Unknown(name) => Err(format!("Unknown function: '{name}'")),
     }
 }
 
