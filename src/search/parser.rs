@@ -23,15 +23,8 @@ where
         .labelled("value");
 
         // --- Lists ---
-        let list_item = expr
+        let list = expr
             .clone()
-            .then(just(Token::RangeOp).ignore_then(expr.clone()).or_not())
-            .map(|(start, end_opt)| match end_opt {
-                Some(end) => Expr::Range(Box::new(start), Box::new(end)),
-                None => start,
-            });
-
-        let list = list_item
             .separated_by(just(Token::Comma))
             .collect::<Vec<_>>()
             .delimited_by(just(Token::LBracket), just(Token::RBracket))
@@ -89,6 +82,14 @@ where
                 .rfold(rhs, |acc, op| Expr::Unary(op, Box::new(acc)))
         });
 
+        let range = unary
+            .clone()
+            .then(just(Token::RangeOp).ignore_then(unary.clone()).or_not())
+            .map(|(start, end_opt)| match end_opt {
+                Some(end) => Expr::Range(Box::new(start), Box::new(end)),
+                None => start,
+            });
+
         // --- Comparisons & Chaining ---
         let op = choice((
             just(Token::Eq).to(BinaryOp::Eq),
@@ -101,9 +102,9 @@ where
             just(Token::In).to(BinaryOp::In),
         ));
 
-        let comparison = unary
+        let comparison = range
             .clone()
-            .then(op.then(unary).repeated().collect::<Vec<_>>())
+            .then(op.then(range).repeated().collect::<Vec<_>>())
             .map(|(lhs, ops)| {
                 if ops.is_empty() {
                     lhs

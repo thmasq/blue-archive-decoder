@@ -294,6 +294,20 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
                     return Ok(Value::Null);
                 }
 
+                if let Expr::Range(start, end) = &**rhs {
+                    let start_val = evaluate(start, row, columns, row_index)?;
+                    let end_val = evaluate(end, row, columns, row_index)?;
+
+                    let ge = compare_values(&l_val, &start_val, &BinaryOp::Gte)?;
+                    let le = compare_values(&l_val, &end_val, &BinaryOp::Lte)?;
+
+                    return if is_truthy(&ge) && is_truthy(&le) {
+                        Ok(Value::Integer(1))
+                    } else {
+                        Ok(Value::Integer(0))
+                    };
+                }
+
                 return if let Expr::List(items) = &**rhs {
                     for item in items {
                         if let Expr::Range(start, end) = item {
