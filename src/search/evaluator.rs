@@ -34,6 +34,7 @@ fn is_constant(expr: &Expr) -> bool {
         Expr::Unary(_, inner) => is_constant(inner),
         Expr::Call(_, args) => args.iter().all(is_constant),
         Expr::List(items) => items.iter().all(is_constant),
+        Expr::Range(start, end) => is_constant(start) && is_constant(end),
         Expr::RegexMatch(lhs, _) => is_constant(lhs),
         Expr::SetMatch(lhs, _) => is_constant(lhs),
     }
@@ -60,7 +61,9 @@ pub fn optimize(expr: Expr) -> Result<Expr, String> {
 
             if op == BinaryOp::In {
                 if let Expr::List(items) = &rhs_opt {
-                    if items.iter().all(is_constant) {
+                    let has_range = items.iter().any(|i| matches!(i, Expr::Range(..)));
+
+                    if items.iter().all(is_constant) && !has_range {
                         let mut set = HashSet::new();
                         for item in items {
                             if let Ok(val) = evaluate(item, &[], &[], 0) {
@@ -98,6 +101,10 @@ pub fn optimize(expr: Expr) -> Result<Expr, String> {
         }
 
         Expr::Unary(op, inner) => Expr::Unary(op, Box::new(optimize(*inner)?)),
+
+        Expr::Range(start, end) => {
+            Expr::Range(Box::new(optimize(*start)?), Box::new(optimize(*end)?))
+        }
 
         Expr::Call(func_id, args) => {
             let resolved_id = resolve_function_id(&func_id);
@@ -151,6 +158,10 @@ pub fn bind(expr: Expr, columns: &[String]) -> Result<Expr, String> {
             Box::new(bind(*rhs, columns)?),
         )),
         Expr::Unary(op, inner) => Ok(Expr::Unary(op, Box::new(bind(*inner, columns)?))),
+        Expr::Range(start, end) => Ok(Expr::Range(
+            Box::new(bind(*start, columns)?),
+            Box::new(bind(*end, columns)?),
+        )),
         Expr::RegexMatch(lhs, pat) => Ok(Expr::RegexMatch(Box::new(bind(*lhs, columns)?), pat)),
         Expr::SetMatch(lhs, set) => Ok(Expr::SetMatch(Box::new(bind(*lhs, columns)?), set)),
 
@@ -192,6 +203,9 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
 
         // --- References ---
         Expr::List(_) => Err("Lists can only be used in 'in' checks".to_string()),
+        Expr::Range(_, _) => {
+            Err("Ranges can only be used inside lists for 'in' checks".to_string())
+        }
 
         Expr::RowIndex => Ok(Value::Integer((row_index + 1) as i64)),
 
@@ -282,6 +296,19 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
 
                 return if let Expr::List(items) = &**rhs {
                     for item in items {
+                        if let Expr::Range(start, end) = item {
+                            let start_val = evaluate(start, row, columns, row_index)?;
+                            let end_val = evaluate(end, row, columns, row_index)?;
+
+                            let ge = compare_values(&l_val, &start_val, &BinaryOp::Gte)?;
+                            let le = compare_values(&l_val, &end_val, &BinaryOp::Lte)?;
+
+                            if is_truthy(&ge) && is_truthy(&le) {
+                                return Ok(Value::Integer(1));
+                            }
+                            continue;
+                        }
+
                         let item_val = evaluate(item, row, columns, row_index)?;
                         if values_equal(&l_val, &item_val) {
                             return Ok(Value::Integer(1));

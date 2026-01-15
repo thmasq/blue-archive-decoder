@@ -23,8 +23,15 @@ where
         .labelled("value");
 
         // --- Lists ---
-        let list = expr
+        let list_item = expr
             .clone()
+            .then(just(Token::RangeOp).ignore_then(expr.clone()).or_not())
+            .map(|(start, end_opt)| match end_opt {
+                Some(end) => Expr::Range(Box::new(start), Box::new(end)),
+                None => start,
+            });
+
+        let list = list_item
             .separated_by(just(Token::Comma))
             .collect::<Vec<_>>()
             .delimited_by(just(Token::LBracket), just(Token::RBracket))

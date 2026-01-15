@@ -76,6 +76,7 @@ pub enum Expr {
     // Operations
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Unary(UnaryOp, Box<Expr>),
+    Range(Box<Expr>, Box<Expr>), // start..end
 
     // Optimizations
     RegexMatch(Box<Expr>, CompiledPattern),

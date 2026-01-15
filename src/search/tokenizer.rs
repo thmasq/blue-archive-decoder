@@ -97,6 +97,9 @@ pub enum Token {
     #[token(".")]
     Dot,
 
+    #[token("..")]
+    RangeOp,
+
     // --- Special ---
     #[token("@row")]
     RowIndex,
