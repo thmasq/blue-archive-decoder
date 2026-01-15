@@ -34,6 +34,7 @@ pub enum BinaryOp {
     Lte,
     Regex, // ~=
     In,    // in
+    NotIn, // not in
 }
 
 #[derive(Debug, Clone, PartialEq)]

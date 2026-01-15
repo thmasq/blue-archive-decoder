@@ -100,6 +100,9 @@ where
             just(Token::Gte).to(BinaryOp::Gte),
             just(Token::Regex).to(BinaryOp::Regex),
             just(Token::In).to(BinaryOp::In),
+            just(Token::Not)
+                .ignore_then(just(Token::In))
+                .to(BinaryOp::NotIn),
         ));
 
         let comparison = range

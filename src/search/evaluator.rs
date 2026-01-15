@@ -59,7 +59,7 @@ pub fn optimize(expr: Expr) -> Result<Expr, String> {
                 }
             }
 
-            if op == BinaryOp::In {
+            if matches!(op, BinaryOp::In | BinaryOp::NotIn) {
                 if let Expr::List(items) = &rhs_opt {
                     let has_range = items.iter().any(|i| matches!(i, Expr::Range(..)));
 
@@ -77,7 +77,14 @@ pub fn optimize(expr: Expr) -> Result<Expr, String> {
                                 set.insert(s);
                             }
                         }
-                        return Ok(Expr::SetMatch(Box::new(lhs_opt), set));
+
+                        let match_expr = Expr::SetMatch(Box::new(lhs_opt.clone()), set);
+
+                        return Ok(if matches!(op, BinaryOp::NotIn) {
+                            Expr::Unary(UnaryOp::Not, Box::new(match_expr))
+                        } else {
+                            match_expr
+                        });
                     }
                 }
             }
@@ -287,28 +294,23 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
                 return evaluate(rhs, row, columns, row_index);
             }
 
-            if let BinaryOp::In = op {
+            if matches!(op, BinaryOp::In | BinaryOp::NotIn) {
                 let l_val = evaluate(lhs, row, columns, row_index)?;
 
                 if let Value::Null = l_val {
                     return Ok(Value::Null);
                 }
 
-                if let Expr::Range(start, end) = &**rhs {
+                let is_in = if let Expr::Range(start, end) = &**rhs {
                     let start_val = evaluate(start, row, columns, row_index)?;
                     let end_val = evaluate(end, row, columns, row_index)?;
 
                     let ge = compare_values(&l_val, &start_val, &BinaryOp::Gte)?;
                     let le = compare_values(&l_val, &end_val, &BinaryOp::Lte)?;
 
-                    return if is_truthy(&ge) && is_truthy(&le) {
-                        Ok(Value::Integer(1))
-                    } else {
-                        Ok(Value::Integer(0))
-                    };
-                }
-
-                return if let Expr::List(items) = &**rhs {
+                    is_truthy(&ge) && is_truthy(&le)
+                } else if let Expr::List(items) = &**rhs {
+                    let mut found = false;
                     for item in items {
                         if let Expr::Range(start, end) = item {
                             let start_val = evaluate(start, row, columns, row_index)?;
@@ -318,20 +320,29 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
                             let le = compare_values(&l_val, &end_val, &BinaryOp::Lte)?;
 
                             if is_truthy(&ge) && is_truthy(&le) {
-                                return Ok(Value::Integer(1));
+                                found = true;
+                                break;
                             }
-                            continue;
-                        }
-
-                        let item_val = evaluate(item, row, columns, row_index)?;
-                        if values_equal(&l_val, &item_val) {
-                            return Ok(Value::Integer(1));
+                        } else {
+                            let item_val = evaluate(item, row, columns, row_index)?;
+                            if values_equal(&l_val, &item_val) {
+                                found = true;
+                                break;
+                            }
                         }
                     }
-                    Ok(Value::Integer(0))
+                    found
                 } else {
-                    Err("Right side of 'in' must be a list [...]".to_string())
+                    return Err("Right side of 'in' must be a list [...] or range".to_string());
                 };
+
+                let result = if is_in { 1 } else { 0 };
+
+                return Ok(Value::Integer(if matches!(op, BinaryOp::NotIn) {
+                    1 - result
+                } else {
+                    result
+                }));
             }
 
             let l_val = evaluate(lhs, row, columns, row_index)?;
