@@ -12,7 +12,6 @@ pub fn optimize(expr: Expr) -> Result<Expr, String> {
                 if let Expr::String(ref pat) = *rhs {
                     let re = regex::Regex::new(pat).map_err(|e| format!("Invalid Regex: {e}"))?;
 
-                    // Optimize the left side recursively
                     let lhs_optimized = optimize(*lhs)?;
 
                     return Ok(Expr::RegexMatch(
@@ -25,7 +24,6 @@ pub fn optimize(expr: Expr) -> Result<Expr, String> {
                 }
             }
 
-            // Standard recursion for other binary ops
             Ok(Expr::Binary(
                 Box::new(optimize(*lhs)?),
                 op,
@@ -47,7 +45,6 @@ pub fn optimize(expr: Expr) -> Result<Expr, String> {
             }
             Ok(Expr::List(new_items))
         }
-        // Base cases (Null, Literals, RowIndex, Column) remain unchanged
         e => Ok(e),
     }
 }
@@ -109,7 +106,7 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
         // --- References ---
         Expr::List(_) => Err("Lists can only be used in 'in' checks".to_string()),
 
-        Expr::RowIndex => Ok(Value::Integer(row_index as i64)),
+        Expr::RowIndex => Ok(Value::Integer((row_index + 1) as i64)),
 
         Expr::ColumnIndex(idx) => Ok(row.get(*idx).cloned().unwrap_or(Value::Null)),
 
