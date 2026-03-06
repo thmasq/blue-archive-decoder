@@ -27,11 +27,16 @@ jobs:
           override: true
           target: wasm32-unknown-unknown
 
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Build WASM
-        run: wasm-pack build --target web
+        run: rustup run nightly wasm-pack build . --target web -- -Z build-std=std,panic_abort
 
       - name: Prepare Deployment Folder
         run: |
