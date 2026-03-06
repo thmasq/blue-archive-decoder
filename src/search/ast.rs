@@ -1,5 +1,4 @@
 use regex::Regex;
-use std::collections::HashSet;
 use std::fmt;
 
 #[derive(Clone)]
@@ -58,6 +57,15 @@ pub enum FunctionId {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Literal {
+    Null,
+    Integer(i64),
+    Float(f64),
+    String(String),
+    Blob(Vec<u8>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     // Values
     Null,
@@ -81,7 +89,7 @@ pub enum Expr {
 
     // Optimizations
     RegexMatch(Box<Expr>, CompiledPattern),
-    SetMatch(Box<Expr>, HashSet<String>),
+    ConstInList(Box<Expr>, Vec<Literal>),
 
     // Functions
     Call(FunctionId, Vec<Expr>),

@@ -251,6 +251,10 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
         spawn_local(async move {
             let total_rows = data.rows.len();
 
+            let window = web_sys::window().expect("should have a window");
+            let performance = window.performance().expect("should have performance API");
+            let start_time = performance.now();
+
             let result_indices = match parse_result {
                 Ok(None) => (0..total_rows).collect::<Vec<_>>(),
                 Ok(Some(ast)) => {
@@ -276,6 +280,17 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                 }
                 Err(_) => vec![],
             };
+
+            let end_time = performance.now();
+            let elapsed_ms = end_time - start_time;
+
+            web_sys::console::log_1(
+                &format!(
+                    "Search evaluated {} rows in {:.2} ms",
+                    total_rows, elapsed_ms
+                )
+                .into(),
+            );
 
             if search_gen.get_untracked() == current_gen {
                 set_filtered_rows.set(result_indices);

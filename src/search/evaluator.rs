@@ -1,9 +1,15 @@
-use crate::search::ast::{BinaryOp, CompiledPattern, Expr, FunctionId, UnaryOp};
+use crate::search::ast::{BinaryOp, CompiledPattern, Expr, FunctionId, Literal, UnaryOp};
 use chrono::NaiveDate;
 use sqlite_wasm_reader::Value;
-use std::collections::HashSet;
+use std::borrow::Cow;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
-pub type EvalResult = Result<Value, String>;
+pub type EvalResult<'a> = Result<Cow<'a, Value>, String>;
+
+thread_local! {
+    static REGEX_CACHE: RefCell<HashMap<String, regex::Regex>> = RefCell::new(HashMap::new());
+}
 
 /// Resolves a string name to a specific FunctionId.
 fn resolve_function_id(id: &FunctionId) -> FunctionId {
@@ -36,7 +42,7 @@ fn is_constant(expr: &Expr) -> bool {
         Expr::List(items) => items.iter().all(is_constant),
         Expr::Range(start, end) => is_constant(start) && is_constant(end),
         Expr::RegexMatch(lhs, _) => is_constant(lhs),
-        Expr::SetMatch(lhs, _) => is_constant(lhs),
+        Expr::ConstInList(lhs, _) => is_constant(lhs),
     }
 }
 
@@ -64,21 +70,26 @@ pub fn optimize(expr: Expr) -> Result<Expr, String> {
                     let has_range = items.iter().any(|i| matches!(i, Expr::Range(..)));
 
                     if items.iter().all(is_constant) && !has_range {
-                        let mut set = HashSet::new();
+                        let mut const_list = Vec::with_capacity(items.len());
+                        let empty_row: &[Value] = &[];
+                        let empty_cols: &[String] = &[];
+
                         for item in items {
-                            if let Ok(val) = evaluate(item, &[], &[], 0) {
-                                let s = match val {
-                                    Value::Text(t) => t,
-                                    Value::Integer(i) => i.to_string(),
-                                    Value::Real(f) => f.to_string(),
-                                    Value::Blob(_) => "<Blob>".to_string(),
-                                    Value::Null => "null".to_string(),
+                            if let Ok(val) = evaluate(item, empty_row, empty_cols, 0) {
+                                let lit = match val.into_owned() {
+                                    Value::Text(t) => Literal::String(t),
+                                    Value::Integer(i) => Literal::Integer(i),
+                                    Value::Real(f) => Literal::Float(f),
+                                    Value::Blob(b) => Literal::Blob(b),
+                                    Value::Null => Literal::Null,
                                 };
-                                set.insert(s);
+                                if !const_list.contains(&lit) {
+                                    const_list.push(lit);
+                                }
                             }
                         }
 
-                        let match_expr = Expr::SetMatch(Box::new(lhs_opt.clone()), set);
+                        let match_expr = Expr::ConstInList(Box::new(lhs_opt.clone()), const_list);
 
                         return Ok(if matches!(op, BinaryOp::NotIn) {
                             Expr::Unary(UnaryOp::Not, Box::new(match_expr))
@@ -115,6 +126,22 @@ pub fn optimize(expr: Expr) -> Result<Expr, String> {
 
         Expr::Call(func_id, args) => {
             let resolved_id = resolve_function_id(&func_id);
+
+            let expected = match resolved_id {
+                FunctionId::Contains => 2,
+                FunctionId::Unknown(ref name) => return Err(format!("Unknown function: '{name}'")),
+                _ => 1,
+            };
+
+            if args.len() != expected {
+                return Err(format!(
+                    "{:?} expected {} argument(s), found {}",
+                    resolved_id,
+                    expected,
+                    args.len()
+                ));
+            }
+
             let mut new_args = Vec::with_capacity(args.len());
             for arg in args {
                 new_args.push(optimize(arg)?);
@@ -134,8 +161,10 @@ pub fn optimize(expr: Expr) -> Result<Expr, String> {
     };
 
     if is_constant(&expr) {
-        if let Ok(val) = evaluate(&expr, &[], &[], 0) {
-            expr = match val {
+        let empty_row: &[Value] = &[];
+        let empty_cols: &[String] = &[];
+        if let Ok(val) = evaluate(&expr, empty_row, empty_cols, 0) {
+            expr = match val.into_owned() {
                 Value::Integer(i) => Expr::Integer(i),
                 Value::Real(f) => Expr::Float(f),
                 Value::Text(s) => Expr::String(s),
@@ -148,7 +177,6 @@ pub fn optimize(expr: Expr) -> Result<Expr, String> {
     Ok(expr)
 }
 
-/// Resolves column names to indices relative to the provided schema.
 pub fn bind(expr: Expr, columns: &[String]) -> Result<Expr, String> {
     match expr {
         Expr::Column(name) => {
@@ -170,7 +198,7 @@ pub fn bind(expr: Expr, columns: &[String]) -> Result<Expr, String> {
             Box::new(bind(*end, columns)?),
         )),
         Expr::RegexMatch(lhs, pat) => Ok(Expr::RegexMatch(Box::new(bind(*lhs, columns)?), pat)),
-        Expr::SetMatch(lhs, set) => Ok(Expr::SetMatch(Box::new(bind(*lhs, columns)?), set)),
+        Expr::ConstInList(lhs, set) => Ok(Expr::ConstInList(Box::new(bind(*lhs, columns)?), set)),
 
         Expr::Call(func_id, args) => {
             let resolved_id = resolve_function_id(&func_id);
@@ -193,20 +221,18 @@ pub fn bind(expr: Expr, columns: &[String]) -> Result<Expr, String> {
     }
 }
 
-/// Evaluates an expression against a specific row.
-///
-/// * `expr`: The AST node to evaluate.
-/// * `row`: The current row of data from the table.
-/// * `columns`: The list of column names (used to resolve `Expr::Column`).
-/// * `row_index`: The index of the current row (used for `@row`).
-pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize) -> EvalResult {
+pub fn evaluate<'a>(
+    expr: &'a Expr,
+    row: &'a [Value],
+    columns: &[String],
+    row_index: usize,
+) -> EvalResult<'a> {
     match expr {
-        // --- Literals ---
-        Expr::Null => Ok(Value::Null),
-        Expr::Bool(b) => Ok(Value::Integer(if *b { 1 } else { 0 })),
-        Expr::Integer(i) => Ok(Value::Integer(*i)),
-        Expr::Float(f) => Ok(Value::Real(*f)),
-        Expr::String(s) => Ok(Value::Text(s.clone())),
+        Expr::Null => Ok(Cow::Owned(Value::Null)),
+        Expr::Bool(b) => Ok(Cow::Owned(Value::Integer(if *b { 1 } else { 0 }))),
+        Expr::Integer(i) => Ok(Cow::Owned(Value::Integer(*i))),
+        Expr::Float(f) => Ok(Cow::Owned(Value::Real(*f))),
+        Expr::String(s) => Ok(Cow::Owned(Value::Text(s.clone()))),
 
         // --- References ---
         Expr::List(_) => Err("Lists can only be used in 'in' checks".to_string()),
@@ -214,64 +240,90 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
             Err("Ranges can only be used inside lists for 'in' checks".to_string())
         }
 
-        Expr::RowIndex => Ok(Value::Integer((row_index + 1) as i64)),
+        Expr::RowIndex => Ok(Cow::Owned(Value::Integer((row_index + 1) as i64))),
 
-        Expr::ColumnIndex(idx) => Ok(row.get(*idx).cloned().unwrap_or(Value::Null)),
+        Expr::ColumnIndex(idx) => Ok(row
+            .get(*idx)
+            .map(Cow::Borrowed)
+            .unwrap_or(Cow::Owned(Value::Null))),
 
         Expr::Column(name) => {
             let idx = columns
                 .iter()
                 .position(|c| c.eq_ignore_ascii_case(name))
                 .ok_or_else(|| format!("Column not found: '{name}'"))?;
-
-            Ok(row.get(idx).cloned().unwrap_or(Value::Null))
+            Ok(row
+                .get(idx)
+                .map(Cow::Borrowed)
+                .unwrap_or(Cow::Owned(Value::Null)))
         }
 
         // --- Unary Operations ---
         Expr::Unary(op, rhs) => {
             let val = evaluate(rhs, row, columns, row_index)?;
 
-            if let Value::Null = val {
-                return Ok(Value::Null);
+            if let Value::Null = val.as_ref() {
+                return Ok(Cow::Owned(Value::Null));
             }
 
             match op {
-                UnaryOp::Not => Ok(Value::Integer(if !is_truthy(&val) { 1 } else { 0 })),
-                UnaryOp::Neg => match val {
-                    Value::Integer(i) => Ok(Value::Integer(-i)),
-                    Value::Real(f) => Ok(Value::Real(-f)),
-                    _ => Err(format!("Cannot negate type {}", val_type(&val))),
+                UnaryOp::Not => Ok(Cow::Owned(Value::Integer(if !is_truthy(val.as_ref()) {
+                    1
+                } else {
+                    0
+                }))),
+                UnaryOp::Neg => match val.as_ref() {
+                    Value::Integer(i) => Ok(Cow::Owned(Value::Integer(-i))),
+                    Value::Real(f) => Ok(Cow::Owned(Value::Real(-f))),
+                    _ => Err(format!("Cannot negate type {}", val_type(val.as_ref()))),
                 },
             }
         }
 
         Expr::RegexMatch(lhs, pat) => {
             let val = evaluate(lhs, row, columns, row_index)?;
-
-            if let Value::Null = val {
-                return Ok(Value::Null);
+            if let Value::Null = val.as_ref() {
+                return Ok(Cow::Owned(Value::Null));
             }
 
-            if let Value::Text(t) = val {
-                Ok(Value::Integer(if pat.re.is_match(&t) { 1 } else { 0 }))
+            if let Value::Text(t) = val.as_ref() {
+                Ok(Cow::Owned(Value::Integer(if pat.re.is_match(t) {
+                    1
+                } else {
+                    0
+                })))
             } else {
-                Err(format!("Regex requires (Text), found ({})", val_type(&val)))
+                Err(format!(
+                    "Regex requires (Text), found ({})",
+                    val_type(val.as_ref())
+                ))
             }
         }
 
-        Expr::SetMatch(lhs, set) => {
+        Expr::ConstInList(lhs, list) => {
             let val = evaluate(lhs, row, columns, row_index)?;
-            if let Value::Null = val {
-                return Ok(Value::Null);
+            if let Value::Null = val.as_ref() {
+                return Ok(Cow::Owned(Value::Null));
             }
-            let s = match val {
-                Value::Text(t) => t,
-                Value::Integer(i) => i.to_string(),
-                Value::Real(f) => f.to_string(),
-                Value::Blob(_) => "<Blob>".to_string(),
-                Value::Null => "null".to_string(),
-            };
-            Ok(Value::Integer(if set.contains(&s) { 1 } else { 0 }))
+
+            let mut found = false;
+            for item in list {
+                let is_eq = match (item, val.as_ref()) {
+                    (Literal::Integer(l), Value::Integer(r)) => *l == *r,
+                    (Literal::Float(l), Value::Real(r)) => (*l - r).abs() < f64::EPSILON,
+                    (Literal::String(l), Value::Text(r)) => l == r,
+                    (Literal::Blob(l), Value::Blob(r)) => l == r,
+                    (Literal::Null, Value::Null) => true,
+                    (Literal::Integer(l), Value::Real(r)) => (*l as f64 - r).abs() < f64::EPSILON,
+                    (Literal::Float(l), Value::Integer(r)) => (*l - *r as f64).abs() < f64::EPSILON,
+                    _ => false,
+                };
+                if is_eq {
+                    found = true;
+                    break;
+                }
+            }
+            Ok(Cow::Owned(Value::Integer(if found { 1 } else { 0 })))
         }
 
         // --- Binary Operations ---
@@ -279,7 +331,7 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
             // Short-circuiting logic for AND / OR
             if matches!(op, BinaryOp::And | BinaryOp::Or) {
                 let left_val = evaluate(lhs, row, columns, row_index)?;
-                let left_truthy = is_truthy(&left_val);
+                let left_truthy = is_truthy(left_val.as_ref());
 
                 if *op == BinaryOp::And {
                     if !left_truthy {
@@ -297,18 +349,18 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
             if matches!(op, BinaryOp::In | BinaryOp::NotIn) {
                 let l_val = evaluate(lhs, row, columns, row_index)?;
 
-                if let Value::Null = l_val {
-                    return Ok(Value::Null);
+                if let Value::Null = l_val.as_ref() {
+                    return Ok(Cow::Owned(Value::Null));
                 }
 
                 let is_in = if let Expr::Range(start, end) = &**rhs {
                     let start_val = evaluate(start, row, columns, row_index)?;
                     let end_val = evaluate(end, row, columns, row_index)?;
 
-                    let ge = compare_values(&l_val, &start_val, &BinaryOp::Gte)?;
-                    let le = compare_values(&l_val, &end_val, &BinaryOp::Lte)?;
+                    let ge = compare_values(l_val.as_ref(), start_val.as_ref(), &BinaryOp::Gte)?;
+                    let le = compare_values(l_val.as_ref(), end_val.as_ref(), &BinaryOp::Lte)?;
 
-                    is_truthy(&ge) && is_truthy(&le)
+                    is_truthy(ge.as_ref()) && is_truthy(le.as_ref())
                 } else if let Expr::List(items) = &**rhs {
                     let mut found = false;
                     for item in items {
@@ -316,16 +368,18 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
                             let start_val = evaluate(start, row, columns, row_index)?;
                             let end_val = evaluate(end, row, columns, row_index)?;
 
-                            let ge = compare_values(&l_val, &start_val, &BinaryOp::Gte)?;
-                            let le = compare_values(&l_val, &end_val, &BinaryOp::Lte)?;
+                            let ge =
+                                compare_values(l_val.as_ref(), start_val.as_ref(), &BinaryOp::Gte)?;
+                            let le =
+                                compare_values(l_val.as_ref(), end_val.as_ref(), &BinaryOp::Lte)?;
 
-                            if is_truthy(&ge) && is_truthy(&le) {
+                            if is_truthy(ge.as_ref()) && is_truthy(le.as_ref()) {
                                 found = true;
                                 break;
                             }
                         } else {
                             let item_val = evaluate(item, row, columns, row_index)?;
-                            if values_equal(&l_val, &item_val) {
+                            if values_equal(l_val.as_ref(), item_val.as_ref()) {
                                 found = true;
                                 break;
                             }
@@ -338,47 +392,62 @@ pub fn evaluate(expr: &Expr, row: &[Value], columns: &[String], row_index: usize
 
                 let result = if is_in { 1 } else { 0 };
 
-                return Ok(Value::Integer(if matches!(op, BinaryOp::NotIn) {
-                    1 - result
-                } else {
-                    result
-                }));
+                return Ok(Cow::Owned(Value::Integer(
+                    if matches!(op, BinaryOp::NotIn) {
+                        1 - result
+                    } else {
+                        result
+                    },
+                )));
             }
 
             let l_val = evaluate(lhs, row, columns, row_index)?;
             let r_val = evaluate(rhs, row, columns, row_index)?;
 
-            if matches!(l_val, Value::Null) || matches!(r_val, Value::Null) {
-                return Ok(Value::Null);
+            if matches!(l_val.as_ref(), Value::Null) || matches!(r_val.as_ref(), Value::Null) {
+                return Ok(Cow::Owned(Value::Null));
             }
 
             match op {
-                BinaryOp::Eq => Ok(Value::Integer(if values_equal(&l_val, &r_val) {
-                    1
-                } else {
-                    0
-                })),
-                BinaryOp::NotEq => Ok(Value::Integer(if !values_equal(&l_val, &r_val) {
-                    1
-                } else {
-                    0
-                })),
+                BinaryOp::Eq => Ok(Cow::Owned(Value::Integer(
+                    if values_equal(l_val.as_ref(), r_val.as_ref()) {
+                        1
+                    } else {
+                        0
+                    },
+                ))),
+                BinaryOp::NotEq => Ok(Cow::Owned(Value::Integer(
+                    if !values_equal(l_val.as_ref(), r_val.as_ref()) {
+                        1
+                    } else {
+                        0
+                    },
+                ))),
 
-                BinaryOp::Regex => match (&l_val, &r_val) {
+                BinaryOp::Regex => match (l_val.as_ref(), r_val.as_ref()) {
                     (Value::Text(t), Value::Text(pat)) => {
-                        let re =
-                            regex::Regex::new(pat).map_err(|e| format!("Invalid Regex: {e}"))?;
-                        Ok(Value::Integer(if re.is_match(t) { 1 } else { 0 }))
+                        let is_match = REGEX_CACHE.with(|cache| {
+                            let mut cache = cache.borrow_mut();
+                            if let Some(re) = cache.get(pat) {
+                                return Ok::<bool, String>(re.is_match(t));
+                            }
+                            let re = regex::Regex::new(pat)
+                                .map_err(|e| format!("Invalid Regex: {e}"))?;
+                            let m = re.is_match(t);
+                            cache.insert(pat.clone(), re);
+                            Ok(m)
+                        })?;
+                        Ok(Cow::Owned(Value::Integer(if is_match { 1 } else { 0 })))
                     }
                     _ => Err(format!(
                         "Regex requires (Text ~= Text), found ({} ~= {})",
-                        val_type(&l_val),
-                        val_type(&r_val)
+                        val_type(l_val.as_ref()),
+                        val_type(r_val.as_ref())
                     )),
                 },
 
                 BinaryOp::Gt | BinaryOp::Lt | BinaryOp::Gte | BinaryOp::Lte => {
-                    compare_values(&l_val, &r_val, op)
+                    compare_values(l_val.as_ref(), r_val.as_ref(), op)
                 }
 
                 _ => Err(format!("Unknown binary operator {:?}", op)),
@@ -433,7 +502,7 @@ fn values_equal(lhs: &Value, rhs: &Value) -> bool {
     }
 }
 
-fn compare_values(lhs: &Value, rhs: &Value, op: &BinaryOp) -> EvalResult {
+fn compare_values<'a>(lhs: &Value, rhs: &Value, op: &BinaryOp) -> EvalResult<'a> {
     let matches = match (lhs, rhs) {
         (Value::Integer(l), Value::Integer(r)) => apply_ord(l, r, op),
         (Value::Real(l), Value::Real(r)) => apply_ord(l, r, op),
@@ -456,7 +525,7 @@ fn compare_values(lhs: &Value, rhs: &Value, op: &BinaryOp) -> EvalResult {
         }
     };
 
-    Ok(Value::Integer(if matches { 1 } else { 0 }))
+    Ok(Cow::Owned(Value::Integer(if matches { 1 } else { 0 })))
 }
 
 fn apply_ord<T: PartialOrd>(l: &T, r: &T, op: &BinaryOp) -> bool {
@@ -471,141 +540,96 @@ fn apply_ord<T: PartialOrd>(l: &T, r: &T, op: &BinaryOp) -> bool {
 
 // --- Standard Library ---
 
-fn call_function(func_id: &FunctionId, args: &[Value]) -> EvalResult {
+fn call_function<'a>(func_id: &FunctionId, args: &[Cow<'a, Value>]) -> EvalResult<'a> {
     match func_id {
-        // int(val)
-        FunctionId::Int => {
-            check_arg_count("int", args, 1)?;
-            match &args[0] {
-                Value::Integer(i) => Ok(Value::Integer(*i)),
-                Value::Real(f) => Ok(Value::Integer(*f as i64)),
-                Value::Text(s) => s
-                    .parse::<i64>()
-                    .map(Value::Integer)
-                    .map_err(|_| format!("int(): Cannot parse '{s}'")),
-                Value::Null => Ok(Value::Null),
-                _ => Err(format!("int(): Cannot cast {}", val_type(&args[0]))),
+        FunctionId::Int => match args[0].as_ref() {
+            Value::Integer(i) => Ok(Cow::Owned(Value::Integer(*i))),
+            Value::Real(f) => Ok(Cow::Owned(Value::Integer(*f as i64))),
+            Value::Text(s) => s
+                .parse::<i64>()
+                .map(|i| Cow::Owned(Value::Integer(i)))
+                .map_err(|_| format!("int(): Cannot parse '{s}'")),
+            Value::Null => Ok(Cow::Owned(Value::Null)),
+            v => Err(format!("int(): Cannot cast {}", val_type(v))),
+        },
+
+        FunctionId::Float => match args[0].as_ref() {
+            Value::Real(f) => Ok(Cow::Owned(Value::Real(*f))),
+            Value::Integer(i) => Ok(Cow::Owned(Value::Real(*i as f64))),
+            Value::Text(s) => s
+                .parse::<f64>()
+                .map(|f| Cow::Owned(Value::Real(f)))
+                .map_err(|_| format!("float(): Cannot parse '{s}'")),
+            Value::Null => Ok(Cow::Owned(Value::Null)),
+            v => Err(format!("float(): Cannot cast {}", val_type(v))),
+        },
+
+        FunctionId::String => match args[0].as_ref() {
+            Value::Text(s) => Ok(Cow::Owned(Value::Text(s.clone()))),
+            Value::Integer(i) => Ok(Cow::Owned(Value::Text(i.to_string()))),
+            Value::Real(f) => Ok(Cow::Owned(Value::Text(f.to_string()))),
+            Value::Blob(_) => Ok(Cow::Owned(Value::Text("<Blob>".to_string()))),
+            Value::Null => Ok(Cow::Owned(Value::Text("null".to_string()))),
+        },
+
+        FunctionId::Date => match args[0].as_ref() {
+            Value::Text(s) => {
+                let date =
+                    NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| format!("date(): {e}"))?;
+
+                let ts = date
+                    .and_hms_opt(0, 0, 0)
+                    .ok_or("date(): Invalid time")?
+                    .and_utc()
+                    .timestamp();
+
+                Ok(Cow::Owned(Value::Integer(ts)))
             }
-        }
+            Value::Null => Ok(Cow::Owned(Value::Null)),
+            v => Err(format!("date(): Expected String, found {}", val_type(v))),
+        },
 
-        // float(val)
-        FunctionId::Float => {
-            check_arg_count("float", args, 1)?;
-            match &args[0] {
-                Value::Real(f) => Ok(Value::Real(*f)),
-                Value::Integer(i) => Ok(Value::Real(*i as f64)),
-                Value::Text(s) => s
-                    .parse::<f64>()
-                    .map(Value::Real)
-                    .map_err(|_| format!("float(): Cannot parse '{s}'")),
-                Value::Null => Ok(Value::Null),
-                _ => Err(format!("float(): Cannot cast {}", val_type(&args[0]))),
-            }
-        }
+        FunctionId::Len => match args[0].as_ref() {
+            Value::Text(s) => Ok(Cow::Owned(Value::Integer(s.len() as i64))),
+            Value::Blob(b) => Ok(Cow::Owned(Value::Integer(b.len() as i64))),
+            Value::Null => Ok(Cow::Owned(Value::Null)),
+            v => Err(format!("len(): Expected Text/Blob, found {}", val_type(v))),
+        },
 
-        // str(val)
-        FunctionId::String => {
-            check_arg_count("str", args, 1)?;
-            match &args[0] {
-                Value::Text(s) => Ok(Value::Text(s.clone())),
-                Value::Integer(i) => Ok(Value::Text(i.to_string())),
-                Value::Real(f) => Ok(Value::Text(f.to_string())),
-                Value::Blob(_) => Ok(Value::Text("<Blob>".to_string())),
-                Value::Null => Ok(Value::Text("null".to_string())),
-            }
-        }
+        FunctionId::Lower => match args[0].as_ref() {
+            Value::Text(s) => Ok(Cow::Owned(Value::Text(s.to_lowercase()))),
+            Value::Null => Ok(Cow::Owned(Value::Null)),
+            v => Err(format!("lower(): Expected Text, found {}", val_type(v))),
+        },
 
-        // date(val) -> timestamp
-        FunctionId::Date => {
-            check_arg_count("date", args, 1)?;
-            match &args[0] {
-                Value::Text(s) => {
-                    // Uses Chrono for parsing
-                    let date = NaiveDate::parse_from_str(s, "%Y-%m-%d")
-                        .map_err(|e| format!("date(): {e}"))?;
+        FunctionId::Upper => match args[0].as_ref() {
+            Value::Text(s) => Ok(Cow::Owned(Value::Text(s.to_uppercase()))),
+            Value::Null => Ok(Cow::Owned(Value::Null)),
+            v => Err(format!("upper(): Expected Text, found {}", val_type(v))),
+        },
 
-                    // Convert to timestamp (seconds)
-                    let ts = date
-                        .and_hms_opt(0, 0, 0)
-                        .ok_or("date(): Invalid time")?
-                        .and_utc()
-                        .timestamp();
-
-                    Ok(Value::Integer(ts))
-                }
-                Value::Null => Ok(Value::Null),
-                v => Err(format!("date(): Expected String, found {}", val_type(v))),
-            }
-        }
-
-        // len(val)
-        FunctionId::Len => {
-            check_arg_count("len", args, 1)?;
-            match &args[0] {
-                Value::Text(s) => Ok(Value::Integer(s.len() as i64)),
-                Value::Blob(b) => Ok(Value::Integer(b.len() as i64)),
-                Value::Null => Ok(Value::Null),
-                v => Err(format!("len(): Expected Text/Blob, found {}", val_type(v))),
-            }
-        }
-
-        // lower(val)
-        FunctionId::Lower => {
-            check_arg_count("lower", args, 1)?;
-            match &args[0] {
-                Value::Text(s) => Ok(Value::Text(s.to_lowercase())),
-                Value::Null => Ok(Value::Null),
-                v => Err(format!("lower(): Expected Text, found {}", val_type(v))),
-            }
-        }
-
-        // upper(val)
-        FunctionId::Upper => {
-            check_arg_count("upper", args, 1)?;
-            match &args[0] {
-                Value::Text(s) => Ok(Value::Text(s.to_uppercase())),
-                Value::Null => Ok(Value::Null),
-                v => Err(format!("upper(): Expected Text, found {}", val_type(v))),
-            }
-        }
-
-        // contains(haystack, needle)
-        FunctionId::Contains => {
-            check_arg_count("contains", args, 2)?;
-            match (&args[0], &args[1]) {
-                (Value::Text(h), Value::Text(n)) => {
-                    Ok(Value::Integer(if h.contains(n) { 1 } else { 0 }))
-                }
-                (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
-                (h, n) => Err(format!(
-                    "contains(): Expected (Text, Text), found ({}, {})",
-                    val_type(h),
-                    val_type(n)
-                )),
-            }
-        }
-
-        // is_null(val)
-        FunctionId::IsNull => {
-            check_arg_count("is_null", args, 1)?;
-            Ok(Value::Integer(if matches!(args[0], Value::Null) {
+        FunctionId::Contains => match (args[0].as_ref(), args[1].as_ref()) {
+            (Value::Text(h), Value::Text(n)) => Ok(Cow::Owned(Value::Integer(if h.contains(n) {
                 1
             } else {
                 0
-            }))
-        }
+            }))),
+            (Value::Null, _) | (_, Value::Null) => Ok(Cow::Owned(Value::Null)),
+            (h, n) => Err(format!(
+                "contains(): Expected (Text, Text), found ({}, {})",
+                val_type(h),
+                val_type(n)
+            )),
+        },
+
+        FunctionId::IsNull => Ok(Cow::Owned(Value::Integer(
+            if matches!(args[0].as_ref(), Value::Null) {
+                1
+            } else {
+                0
+            },
+        ))),
 
         FunctionId::Unknown(name) => Err(format!("Unknown function: '{name}'")),
-    }
-}
-
-fn check_arg_count(name: &str, args: &[Value], expected: usize) -> Result<(), String> {
-    if args.len() == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "{name}(): Expected {expected} argument(s), found {}",
-            args.len()
-        ))
     }
 }
