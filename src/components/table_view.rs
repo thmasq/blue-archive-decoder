@@ -238,7 +238,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
             .unwrap_or_default()
     });
 
-    let (filtered_rows, set_filtered_rows) = signal((0..data.rows.len()).collect::<Vec<_>>());
+    let (filtered_rows, set_filtered_rows) = signal((0..data.row_count).collect::<Vec<_>>());
     let (search_gen, set_search_gen) = signal(0_usize);
 
     Effect::new(move |_| {
@@ -249,7 +249,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
         let current_gen = search_gen.get_untracked();
 
         spawn_local(async move {
-            let total_rows = data.rows.len();
+            let total_rows = data.row_count;
 
             let window = web_sys::window().expect("should have a window");
             let performance = window.performance().expect("should have performance API");
@@ -259,21 +259,32 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                 Ok(None) => (0..total_rows).collect::<Vec<_>>(),
                 Ok(Some(ast)) => {
                     let mut results = Vec::new();
+                    let eval_res =
+                        evaluator::evaluate(&ast, &data.columns_data, &data.columns, total_rows);
 
-                    for (i, row) in data.rows.iter().enumerate() {
-                        if search_gen.get_untracked() != current_gen {
-                            return;
-                        }
-
-                        let result = evaluator::evaluate(&ast, row, &data.columns, i);
-
-                        let is_match = match result {
-                            Ok(val) => evaluator::is_truthy(&val),
-                            Err(_) => false,
-                        };
-
-                        if is_match {
-                            results.push(i);
+                    match eval_res {
+                        Ok(col_res) => match &col_res {
+                            evaluator::ColumnarResult::Bitmap(bmp) => {
+                                for i in bmp.iter_ones() {
+                                    if search_gen.get_untracked() != current_gen {
+                                        return;
+                                    }
+                                    results.push(i);
+                                }
+                            }
+                            _ => {
+                                for i in 0..total_rows {
+                                    if search_gen.get_untracked() != current_gen {
+                                        return;
+                                    }
+                                    if evaluator::is_truthy(col_res.get(i).as_ref()) {
+                                        results.push(i);
+                                    }
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            web_sys::console::error_1(&format!("Eval error: {}", e).into());
                         }
                     }
                     results
@@ -321,15 +332,16 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
         }
 
         for row_idx in rows_indices {
-            if row_idx >= data.rows.len() {
+            if row_idx >= data.row_count {
                 continue;
             }
-            let row = &data.rows[row_idx];
-            let row_strings: Vec<String> = row
+
+            let row_strings: Vec<String> = data
+                .columns_data
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| !hidden.contains(i))
-                .map(|(_, val)| match val {
+                .map(|(_, col)| match &col[row_idx] {
                     Value::Text(t) => t.clone(),
                     Value::Integer(n) => n.to_string(),
                     Value::Real(f) => f.to_string(),
@@ -380,21 +392,20 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     };
 
     let item_height_calc = move |_idx: usize, row_idx: &usize| -> usize {
-        if *row_idx >= data_for_height.rows.len() {
+        if *row_idx >= data_for_height.row_count {
             return default_row_height;
         }
-        let row = &data_for_height.rows[*row_idx];
 
         let widths = measured_widths.get();
         let hidden = hidden_indices.get();
 
         let mut max_height = default_row_height as f32;
 
-        for (col_idx, val) in row.iter().enumerate() {
+        for (col_idx, col) in data_for_height.columns_data.iter().enumerate() {
             if hidden.contains(&col_idx) {
                 continue;
             }
-            if let Value::Text(text) = val {
+            if let Value::Text(text) = &col[*row_idx] {
                 let col_w = if col_idx < widths.len() {
                     widths[col_idx]
                 } else {
@@ -564,7 +575,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                     reset_trigger=resize_trigger
                     node_ref=scroll_view_ref
                     children=move |(_, row_idx)| {
-                        if *row_idx >= data_for_scroller.rows.len() {
+                        if *row_idx >= data_for_scroller.row_count {
                             return view! { <div>"Error"</div> }.into_any();
                         }
                         let data_cells = data_for_scroller.clone();
@@ -577,9 +588,9 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                                 </div>
                                 {move || {
                                     let hidden = hidden_indices.get();
-                                    let row = &data_cells.rows[current_row_idx];
 
-                                    row.iter().enumerate().filter(|(i, _)| !hidden.contains(i)).map(|(_, val)| {
+                                    data_cells.columns_data.iter().enumerate().filter(|(i, _)| !hidden.contains(i)).map(|(_, col)| {
+                                        let val = &col[current_row_idx];
                                         let (txt, color, align) = match val {
                                             Value::Null => (String::new(), "#ccc", "left"),
                                             Value::Integer(i) => (i.to_string(), "#1155cc", "right"),

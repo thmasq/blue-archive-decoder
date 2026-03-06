@@ -9,5 +9,6 @@ pub const FONT_SIZE: f32 = 13.0;
 pub struct TableData {
     pub name: String,
     pub columns: Vec<String>,
-    pub rows: Vec<Vec<Value>>,
+    pub columns_data: Vec<Vec<Value>>,
+    pub row_count: usize,
 }

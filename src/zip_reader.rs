@@ -6,7 +6,7 @@ use std::io::{Cursor, Read};
 use zip::ZipArchive;
 
 type ZipEntryLoader =
-    Box<dyn Fn(&[u8]) -> Result<(Vec<String>, Vec<Vec<Value>>), Box<dyn std::error::Error>>>;
+    Box<dyn Fn(&[u8]) -> Result<(Vec<String>, Vec<Vec<Value>>, usize), Box<dyn std::error::Error>>>;
 
 fn generate_zip_password(filename: &str) -> String {
     let key = create_key(filename, 15);
@@ -48,11 +48,13 @@ macro_rules! register_zip_table {
                     .unwrap_or(stringify!($base_name));
                 let item_key = create_key(item_seed_name, 8);
 
-                let mut result_rows = Vec::new();
+                let mut columns_data = Vec::new();
                 let mut headers = Vec::new();
+                let mut row_count = 0;
 
                 if let serde_json::Value::Object(map) = json_val {
                     if let Some(serde_json::Value::Array(list)) = map.get("data_list") {
+                         row_count = list.len();
                          if let Some(serde_json::Value::Object(first_item)) = list.first() {
                              headers = first_item.keys()
                                 .filter(|k| !k.ends_with("_th") && !k.ends_with("_tw") && *k != "tw" && *k != "th")
@@ -60,40 +62,37 @@ macro_rules! register_zip_table {
                                 .collect();
                          }
 
-                     for item in list {
-                        if let serde_json::Value::Object(item_map) = item {
-                            let mut row_vec = Vec::new();
-                            for header in &headers {
-                                let val = item_map.get(header).unwrap_or(&serde_json::Value::Null);
+                         columns_data = vec![Vec::with_capacity(row_count); headers.len()];
 
-                                let processed_val = match val {
-                                    serde_json::Value::String(s) => {
-                                        let decrypted = utils::decrypt_string(s, &item_key);
-                                        serde_json::Value::String(decrypted)
-                                    },
-                                    serde_json::Value::Number(n) => {
-                                        if let Some(i) = n.as_i64() {
-                                            let d = utils::decrypt_i64(i, &item_key);
-                                            serde_json::Value::Number(serde_json::Number::from(d))
-                                        } else {
-                                            // Floating point or u64 > i64::MAX?
-                                            // Currently leaving as-is or could try u64 decryption if needed.
-                                            // For now, assuming standard integer IDs.
-                                            val.clone()
-                                        }
-                                    },
-                                    _ => val.clone(),
-                                };
+                         for item in list {
+                            if let serde_json::Value::Object(item_map) = item {
+                                for (i, header) in headers.iter().enumerate() {
+                                    let val = item_map.get(header).unwrap_or(&serde_json::Value::Null);
 
-                                row_vec.push(json_to_sqlite_value(&processed_val));
+                                    let processed_val = match val {
+                                        serde_json::Value::String(s) => {
+                                            let decrypted = utils::decrypt_string(s, &item_key);
+                                            serde_json::Value::String(decrypted)
+                                        },
+                                        serde_json::Value::Number(n) => {
+                                            if let Some(num) = n.as_i64() {
+                                                let d = utils::decrypt_i64(num, &item_key);
+                                                serde_json::Value::Number(serde_json::Number::from(d))
+                                            } else {
+                                                val.clone()
+                                            }
+                                        },
+                                        _ => val.clone(),
+                                    };
+
+                                    columns_data[i].push(json_to_sqlite_value(&processed_val));
+                                }
                             }
-                            result_rows.push(row_vec);
-                        }
-                     }
+                         }
                     }
                 }
 
-                Ok((headers, result_rows))
+                Ok((headers, columns_data, row_count))
             });
 
             let file_name = format!("{}.bytes", stringify!([< $base_name Table >]).to_lowercase());
@@ -133,13 +132,14 @@ pub fn load_zip_tables(zip_data: Vec<u8>) -> Result<HashMap<String, TableData>, 
                     let mut buffer = Vec::new();
                     if file.read_to_end(&mut buffer).is_ok() {
                         match loader(&buffer) {
-                            Ok((cols, rows)) => {
+                            Ok((cols, columns_data, row_count)) => {
                                 tables.insert(
                                     table_name.clone(),
                                     TableData {
                                         name: table_name.clone(),
                                         columns: cols,
-                                        rows,
+                                        columns_data,
+                                        row_count,
                                     },
                                 );
                             }

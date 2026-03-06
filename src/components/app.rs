@@ -204,14 +204,17 @@ fn enrich_academy_messenger(tables: &mut HashMap<String, Arc<TableData>>) {
                 p_cols.iter().position(|c| c == "character_id"),
                 p_cols.iter().position(|c| c == "full_name_en"),
             ) {
-                for row in &profile.rows {
-                    let id = match row.get(id_idx) {
-                        Some(Value::Integer(v)) => *v,
-                        Some(Value::Real(v)) => *v as i64,
+                let id_col = &profile.columns_data[id_idx];
+                let name_col = &profile.columns_data[name_idx];
+
+                for i in 0..profile.row_count {
+                    let id = match &id_col[i] {
+                        Value::Integer(v) => *v,
+                        Value::Real(v) => *v as i64,
                         _ => continue,
                     };
-                    let name = match row.get(name_idx) {
-                        Some(Value::Text(s)) => s.clone(),
+                    let name = match &name_col[i] {
+                        Value::Text(s) => s.clone(),
                         _ => continue,
                     };
                     id_to_name.insert(id, name);
@@ -234,10 +237,13 @@ fn enrich_academy_messenger(tables: &mut HashMap<String, Arc<TableData>>) {
         if let Some(id_idx) = messenger.columns.iter().position(|c| c == "character_id") {
             messenger.columns.insert(0, "full_name_en".to_string());
 
-            for row in &mut messenger.rows {
-                let id = match row.get(id_idx) {
-                    Some(Value::Integer(v)) => *v,
-                    Some(Value::Real(v)) => *v as i64,
+            let mut name_col = Vec::with_capacity(messenger.row_count);
+            let id_col = &messenger.columns_data[id_idx];
+
+            for i in 0..messenger.row_count {
+                let id = match &id_col[i] {
+                    Value::Integer(v) => *v,
+                    Value::Real(v) => *v as i64,
                     _ => -1,
                 };
 
@@ -245,8 +251,10 @@ fn enrich_academy_messenger(tables: &mut HashMap<String, Arc<TableData>>) {
                     .get(&id)
                     .cloned()
                     .unwrap_or_else(|| "???".to_string());
-                row.insert(0, Value::Text(name));
+
+                name_col.push(Value::Text(name));
             }
+            messenger.columns_data.insert(0, name_col);
         }
     }
 }

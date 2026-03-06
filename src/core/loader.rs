@@ -39,12 +39,26 @@ pub fn load_tables(file_data: Vec<u8>) -> Result<HashMap<String, TableData>, Str
         match loader(&mut db) {
             Ok((cols, rows)) => {
                 web_sys::console::log_1(&format!("Loaded custom table: {name}").into());
+
+                let row_count = rows.len();
+                let col_count = cols.len();
+                let mut columns_data = vec![Vec::with_capacity(row_count); col_count];
+
+                for row in rows {
+                    for (i, val) in row.into_iter().enumerate() {
+                        if i < col_count {
+                            columns_data[i].push(val);
+                        }
+                    }
+                }
+
                 tables.insert(
                     name.clone(),
                     TableData {
                         name,
                         columns: cols,
-                        rows,
+                        columns_data,
+                        row_count,
                     },
                 );
             }
@@ -74,17 +88,25 @@ pub fn load_tables(file_data: Vec<u8>) -> Result<HashMap<String, TableData>, Str
         let query = SelectQuery::new(&name);
 
         if let Ok(raw_rows) = db.execute_query(&query) {
-            let rows = raw_rows
-                .into_iter()
-                .map(|r| r.values().cloned().collect())
-                .collect();
+            let row_count = raw_rows.len();
+            let col_count = columns.len();
+            let mut columns_data = vec![Vec::with_capacity(row_count); col_count];
+
+            for r in raw_rows {
+                for (i, val) in r.values().cloned().enumerate() {
+                    if i < col_count {
+                        columns_data[i].push(val);
+                    }
+                }
+            }
 
             tables.insert(
                 name.clone(),
                 TableData {
                     name: name.clone(),
                     columns,
-                    rows,
+                    columns_data,
+                    row_count,
                 },
             );
         }
@@ -113,14 +135,17 @@ fn enrich_scenario_script(tables: &mut HashMap<String, TableData>) {
     let mut name_map: HashMap<i64, String> = HashMap::new();
 
     if let (Some(id_idx), Some(en_idx)) = (id_col_idx, en_col_idx) {
-        for row in &name_table.rows {
-            let id = match row.get(id_idx) {
+        let id_col = &name_table.columns_data[id_idx];
+        let en_col = &name_table.columns_data[en_idx];
+
+        for i in 0..name_table.row_count {
+            let id = match id_col.get(i) {
                 Some(Value::Integer(val)) => *val,
                 Some(Value::Real(val)) => *val as i64,
                 _ => continue,
             };
 
-            let name = match row.get(en_idx) {
+            let name = match en_col.get(i) {
                 Some(Value::Text(s)) => s.clone(),
                 _ => continue,
             };
@@ -138,10 +163,14 @@ fn enrich_scenario_script(tables: &mut HashMap<String, TableData>) {
         if let Some(col_idx) = script_col_idx {
             script_table.columns.insert(0, "Speaker".to_string());
 
-            for row in &mut script_table.rows {
+            let row_count = script_table.row_count;
+            let mut decoded_names = Vec::with_capacity(row_count);
+            let script_col = &script_table.columns_data[col_idx];
+
+            for i in 0..row_count {
                 let mut decoded_name = Value::Null;
 
-                if let Some(Value::Text(script_text)) = row.get(col_idx) {
+                if let Some(Value::Text(script_text)) = script_col.get(i) {
                     let parts: Vec<&str> = script_text.split(';').collect();
 
                     if parts.len() >= 2 && !script_text.trim().starts_with('#') {
@@ -157,9 +186,10 @@ fn enrich_scenario_script(tables: &mut HashMap<String, TableData>) {
                         }
                     }
                 }
-
-                row.insert(0, decoded_name);
+                decoded_names.push(decoded_name);
             }
+
+            script_table.columns_data.insert(0, decoded_names);
         }
     }
 }
