@@ -119,6 +119,7 @@ struct ResizeState {
 pub fn TableView(data: Arc<TableData>) -> impl IntoView {
     let (filter_query, set_filter_query) = signal(String::new());
     let (committed_query, set_committed_query) = signal(String::new());
+    let (context_size, set_context_size) = signal(0_usize);
 
     let data_for_parse = data.clone();
     let data_for_filter = data.clone();
@@ -243,6 +244,8 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
 
     Effect::new(move |_| {
         let parse_result = parsed_search.get();
+        let is_filtered = matches!(parse_result, Ok(Some(_)));
+        let ctx = context_size.get();
         let data = data_for_filter.clone();
 
         set_search_gen.update(|n| *n += 1);
@@ -255,7 +258,7 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
             let performance = window.performance().expect("should have performance API");
             let start_time = performance.now();
 
-            let result_indices = match parse_result {
+            let mut result_indices = match parse_result {
                 Ok(None) => (0..total_rows).collect::<Vec<_>>(),
                 Ok(Some(ast)) => {
                     let mut results = Vec::new();
@@ -291,6 +294,28 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                 }
                 Err(_) => vec![],
             };
+
+            if ctx > 0 && is_filtered && !result_indices.is_empty() {
+                let mut expanded = Vec::with_capacity(result_indices.len() * (ctx * 2 + 1));
+
+                let mut current_start = result_indices[0].saturating_sub(ctx);
+                let mut current_end = (result_indices[0] + ctx).min(total_rows.saturating_sub(1));
+
+                for &idx in &result_indices[1..] {
+                    let s = idx.saturating_sub(ctx);
+                    let e = (idx + ctx).min(total_rows.saturating_sub(1));
+
+                    if s <= current_end + 1 {
+                        current_end = current_end.max(e);
+                    } else {
+                        expanded.extend(current_start..=current_end);
+                        current_start = s;
+                        current_end = e;
+                    }
+                }
+                expanded.extend(current_start..=current_end);
+                result_indices = expanded;
+            }
 
             let end_time = performance.now();
             let elapsed_ms = end_time - start_time;
@@ -464,6 +489,25 @@ pub fn TableView(data: Arc<TableData>) -> impl IntoView {
                             class:error-input=move || !search_error.get().is_empty()
                         />
                     </div>
+
+                    <div style="display: flex; align-items: center; gap: 4px; border-left: 1px solid #dadce0; padding-left: 8px; margin-right: 8px;">
+                        <span style="font-size: 0.8rem; color: #5f6368; user-select: none;">"± Context:"</span>
+                        <input
+                            type="number"
+                            min="0"
+                            prop:value=move || context_size.get().to_string()
+                            on:input=move |ev| {
+                                let val = event_target_value(&ev);
+                                if let Ok(v) = val.parse::<usize>() {
+                                    set_context_size.set(v);
+                                } else if val.is_empty() {
+                                    set_context_size.set(0);
+                                }
+                            }
+                            style="width: 48px; border: 1px solid #dadce0; border-radius: 4px; padding: 2px 4px; outline: none; font-size: 0.8rem; text-align: center;"
+                        />
+                    </div>
+
                     <div style="font-size: 0.8rem; color: #5f6368; user-select: none;">
                         {move || format!("{} records", filtered_rows.get().len())}
                     </div>
